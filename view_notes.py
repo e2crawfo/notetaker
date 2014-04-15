@@ -26,13 +26,23 @@ def view_notes(query, tags_only, show_date, show_tags):
     stripped_contents = []
     orig_contents = []
 
+    # Sort filenames by modification time
+    mod_times = {}
+    for filename in filenames:
+        mod_time = time.ctime(os.path.getmtime(filename))
+        mod_times[filename] = mod_time
+
+    filenames.sort(key=lambda f: mod_times[f])
+
+
     with tempfile.NamedTemporaryFile(suffix='.md') as outfile:
 
+        # Populate the summary file
         for filename in filenames:
             with open(filename, 'r') as f:
                 outfile.write(delim)
                 if show_date:
-                    mod_time = time.ctime(os.path.getmtime(filename))
+                    mod_time = mod_times[filename]
                     outfile.write(" " + str(mod_time))
 
                 outfile.write('\n\n')
@@ -51,10 +61,13 @@ def view_notes(query, tags_only, show_date, show_tags):
 
                 outfile.write('\n\n')
 
+
+        # Display and edit summary file
         outfile.seek(0)
 
         call(['vim', outfile.name])
 
+        # Write edits
         text = outfile.read()
 
         new_contents = [o.split('\n')[2:-2] for o in text.split(delim)[1:]]
@@ -63,7 +76,7 @@ def view_notes(query, tags_only, show_date, show_tags):
 
         for orig, new, filename, stripped in lists:
             if new != orig:
-                print "writing to ", filename
+                print "Writing to ", filename
                 with open(filename, 'w') as f:
                     f.write(new)
                     f.write(stripped)
@@ -76,7 +89,7 @@ if __name__ == "__main__":
     parser.add_argument('-s', action='store_true', help="Supply to show tags.")
     parser.add_argument('--hd', default=False, action='store_true', help="Supply to hide dates.")
     argvals = parser.parse_args()
-    print "argvals:", argvals
+    print "Arguments:", argvals
 
     view_notes(argvals.pattern, tags_only=argvals.t, show_date=not argvals.hd, show_tags=argvals.s)
 
