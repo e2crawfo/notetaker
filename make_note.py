@@ -23,8 +23,9 @@ def make_note(name, tags):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Make a note.')
-    parser.add_argument('name', nargs=1, help="Name of the note.")
-    parser.add_argument('--tags', nargs='*', help="Tags for the note.")
+    parser.add_argument('name', help="Name of the note.")
+    parser.add_argument('-t', nargs='*', help="Tags for the note.")
+
     argvals = parser.parse_args()
 
-    make_note(argvals.name[0], argvals.tags)
+    make_note(argvals.name, argvals.t)

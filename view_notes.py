@@ -1,30 +1,55 @@
 import os, time
 import tempfile
 import argparse
-from subprocess import check_output, call
+from subprocess import check_output, call, CalledProcessError
 
 note_dir = '/home/e2crawfo/Dropbox/notes/'
 delim = '%NOTE%'
+tag_marker='%tag%'
 
-def view_notes(query, write_time=True, tags_only=False):
-    output = check_output(["grep", "-R", "-l", query, note_dir])
+def view_notes(query, tags_only, show_date, show_tags):
 
-    filenames = output.split('\n')[:-1]
+    if tags_only:
+        query = tag_marker + query
+
+    try:
+        grep_output = check_output(["grep", "-R", "-l", query, note_dir])
+    except CalledProcessError as e:
+        if e.returncode == 1:
+            print "No matching files found."
+            return
+        else:
+            raise e
+
+    filenames = grep_output.split('\n')[:-1]
+
+    stripped_contents = []
+    orig_contents = []
 
     with tempfile.NamedTemporaryFile(suffix='.md') as outfile:
 
         for filename in filenames:
             with open(filename, 'r') as f:
-                outfile.write(delim + " ")
-                if write_time:
+                outfile.write(delim)
+                if show_date:
                     mod_time = time.ctime(os.path.getmtime(filename))
-                    outfile.write(str(mod_time))
+                    outfile.write(" " + str(mod_time))
 
                 outfile.write('\n\n')
 
-                outfile.write(f.read())
+                contents = f.read()
 
-                outfile.write('\n')
+                if not show_tags:
+                    contents = contents.partition(tag_marker)
+                    stripped_contents.append(contents[1] + contents[2])
+                    contents = contents[0]
+                else:
+                    stripped_contents.append("")
+
+                orig_contents.append(contents)
+                outfile.write(contents)
+
+                outfile.write('\n\n')
 
         outfile.seek(0)
 
@@ -32,16 +57,26 @@ def view_notes(query, write_time=True, tags_only=False):
 
         text = outfile.read()
 
-        new_contents = [o.split('\n')[2:-1] for o in text.split(delim)[1:]]
+        new_contents = [o.split('\n')[2:-2] for o in text.split(delim)[1:]]
         new_contents = ['\n'.join(nc) for nc in new_contents]
+        lists = zip(orig_contents, new_contents, filenames, stripped_contents)
 
-        for contents, filename in zip(new_contents, filenames):
-            with open(filename, 'w') as f:
-                f.write(contents)
+        for orig, new, filename, stripped in lists:
+            if new != orig:
+                print "writing to ", filename
+                with open(filename, 'w') as f:
+                    f.write(new)
+                    f.write(stripped)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Search and edit notes.')
-    parser.add_argument('pattern', nargs='*', help="Pattern to search for.")
+    parser.add_argument('pattern', help="Pattern to search for.")
+    parser.add_argument('-t', action='store_true', help="Supply to search only in tags.")
+    parser.add_argument('-s', action='store_true', help="Supply to show tags.")
+    parser.add_argument('--hd', default=False, action='store_true', help="Supply to hide dates.")
     argvals = parser.parse_args()
+    print "argvals:", argvals
 
-    view_notes(argvals.pattern[0])
+    view_notes(argvals.pattern, tags_only=argvals.t, show_date=not argvals.hd, show_tags=argvals.s)
+
