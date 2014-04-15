@@ -4,7 +4,7 @@ import argparse
 from subprocess import check_output, call, CalledProcessError
 
 note_dir = '/home/e2crawfo/Dropbox/notes/'
-delim = '#Note'
+delim = '%Note'
 tag_marker='%tag%'
 
 def view_notes(query, tags_only, show_date, show_tags):
@@ -29,7 +29,7 @@ def view_notes(query, tags_only, show_date, show_tags):
     # Sort filenames by modification time
     mod_times = {}
     for filename in filenames:
-        mod_time = time.ctime(os.path.getmtime(filename))
+        mod_time = time.gmtime(os.path.getmtime(filename))
         mod_times[filename] = mod_time
 
     filenames.sort(key=lambda f: mod_times[f])
@@ -40,10 +40,13 @@ def view_notes(query, tags_only, show_date, show_tags):
         # Populate the summary file
         for filename in filenames:
             with open(filename, 'r') as f:
+                outfile.write('*')
                 outfile.write(delim)
                 if show_date:
                     mod_time = mod_times[filename]
-                    outfile.write(" " + str(mod_time))
+                    time_str = time.strftime("%Y-%m-%d %H:%M:%S", mod_time)
+                    outfile.write(" " + str(time_str))
+                outfile.write('*')
 
                 outfile.write('\n\n')
 
