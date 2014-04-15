@@ -1,4 +1,5 @@
 import os, time
+import datetime
 import tempfile
 import argparse
 from subprocess import check_output, call, CalledProcessError
@@ -44,15 +45,26 @@ def view_notes(query, tags_only, show_date, show_tags):
     with tempfile.NamedTemporaryFile(suffix='.md') as outfile:
 
         # Populate the summary file
+
+        date = datetime.date.fromtimestamp(0.0)
+
         for filename in filenames:
             with open(filename, 'r') as f:
-                outfile.write('*')
-                outfile.write(delim)
+
                 if show_date:
+
                     mod_time = mod_times[filename]
-                    time_str = time.strftime("%Y-%m-%d %H:%M:%S", mod_time)
-                    outfile.write(" " + str(time_str))
-                outfile.write('*')
+                    new_date = datetime.date.fromtimestamp(time.mktime(mod_times[filename]))
+
+                    if new_date != date:
+                        time_str = new_date.strftime("%Y-%m-%d")
+                        outfile.write("## Journal: " + str(time_str) + '\n')
+
+                        date = new_date
+
+                outfile.write('**')
+                outfile.write(delim)
+                outfile.write('**')
 
                 outfile.write('\n\n')
 
