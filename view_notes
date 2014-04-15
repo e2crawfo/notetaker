@@ -1,0 +1,9 @@
+#!/home/e2crawfo/.virtualenvs/cleanuplearning/bin/python
+
+# -*- coding: utf-8 -*-
+import sys
+
+from view_notes import main
+
+if __name__ == '__main__':
+    sys.exit(main())

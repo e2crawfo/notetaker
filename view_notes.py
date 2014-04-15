@@ -82,7 +82,7 @@ def view_notes(query, tags_only, show_date, show_tags):
                     f.write(stripped)
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description='Search and edit notes.')
     parser.add_argument('pattern', help="Pattern to search for.")
     parser.add_argument('-t', action='store_true', help="Supply to search only in tags.")
@@ -92,4 +92,7 @@ if __name__ == "__main__":
     print "Arguments:", argvals
 
     view_notes(argvals.pattern, tags_only=argvals.t, show_date=not argvals.hd, show_tags=argvals.s)
+
+if __name__ == "__main__":
+	main()
 
