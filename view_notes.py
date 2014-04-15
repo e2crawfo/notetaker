@@ -9,19 +9,25 @@ tag_marker='%tag%'
 
 def view_notes(query, tags_only, show_date, show_tags):
 
-    if tags_only:
-        query = tag_marker + query
+    if query is None:
+        # Show all files in note_dir
+        (_, _, filenames) = os.walk(note_dir).next()
+        filenames = [os.path.join(note_dir, fn) for fn in filenames]
 
-    try:
-        grep_output = check_output(["grep", "-R", "-l", query, note_dir])
-    except CalledProcessError as e:
-        if e.returncode == 1:
-            print "No matching files found."
-            return
-        else:
-            raise e
+    else:
+        if tags_only:
+            query = tag_marker + query
 
-    filenames = grep_output.split('\n')[:-1]
+        try:
+            grep_output = check_output(["grep", "-R", "-l", query, note_dir])
+        except CalledProcessError as e:
+            if e.returncode == 1:
+                print "No matching files found."
+                return
+            else:
+                raise e
+
+        filenames = grep_output.split('\n')[:-1]
 
     stripped_contents = []
     orig_contents = []
@@ -90,7 +96,7 @@ def view_notes(query, tags_only, show_date, show_tags):
 
 def main():
     parser = argparse.ArgumentParser(description='Search and edit notes.')
-    parser.add_argument('pattern', help="Pattern to search for.")
+    parser.add_argument('pattern', nargs='?', default=None, help="Pattern to search for.")
     parser.add_argument('-t', action='store_true', help="Supply to search only in tags.")
     parser.add_argument('-s', action='store_true', help="Supply to show tags.")
     parser.add_argument('--hd', default=False, action='store_true', help="Supply to hide dates.")
