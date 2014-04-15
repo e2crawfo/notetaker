@@ -4,7 +4,7 @@ import argparse
 from subprocess import check_output, call, CalledProcessError
 
 note_dir = '/home/e2crawfo/Dropbox/notes/'
-delim = '%NOTE%'
+delim = '#Note'
 tag_marker='%tag%'
 
 def view_notes(query, tags_only, show_date, show_tags):
@@ -65,7 +65,10 @@ def view_notes(query, tags_only, show_date, show_tags):
         # Display and edit summary file
         outfile.seek(0)
 
-        call(['vim', outfile.name])
+        try:
+            call(['retext', outfile.name])
+        except:
+            call(['vim', outfile.name])
 
         # Write edits
         text = outfile.read()
