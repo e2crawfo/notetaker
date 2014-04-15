@@ -4,7 +4,7 @@ import datetime
 import argparse
 import string
 
-note_dir = '/home/e2crawfo/Dropbox/notes/'
+note_dir = '/home/e2crawfo/Dropbox/notes/notes'
 tag_marker = '%tag%'
 
 def make_note(name, tags):
