@@ -1,13 +1,19 @@
-import os, time
+import os
+import time
 import datetime
-import tempfile
+from tempfile import NamedTemporaryFile
 import argparse
 from subprocess import check_output, call, CalledProcessError
+import ConfigParser
 
-note_dir = '/home/e2crawfo/Dropbox/notes/notes'
-search_results_dir = '/home/e2crawfo/Dropbox/notes/search'
-delim = '%Note'
-tag_marker='%tag%'
+config_parser = ConfigParser.SafeConfigParser()
+config_parser.read('config.ini')
+
+note_dir = config_parser.get('common', 'note_directory')
+search_results_dir = config_parser.get('common', 'search_directory')
+delim = config_parser.get('common', 'note_delimiter')
+tag_marker = config_parser.get('common', 'tag_marker')
+
 
 def view_notes(query, tags_only, show_date, show_tags, edit):
 
@@ -15,7 +21,7 @@ def view_notes(query, tags_only, show_date, show_tags, edit):
         os.mkdir(note_dir)
 
     if query is None:
-        filenames = [ os.path.join(note_dir, f) for f in os.listdir(note_dir)]
+        filenames = [os.path.join(note_dir, f) for f in os.listdir(note_dir)]
         filenames = filter(lambda f: os.path.isfile(f), filenames)
     else:
         if tags_only:
@@ -46,14 +52,20 @@ def view_notes(query, tags_only, show_date, show_tags, edit):
     if not os.path.isdir(search_results_dir):
         os.mkdir(search_results_dir)
     else:
-        search_filenames = [ os.path.join(search_results_dir, f) for f in os.listdir(search_results_dir)]
-        search_filenames = filter(lambda f: os.path.isfile(f), search_filenames)
+        search_filenames = [os.path.join(search_results_dir, f)
+                            for f in os.listdir(search_results_dir)]
+        search_filenames = filter(
+            lambda f: os.path.isfile(f), search_filenames)
 
         if len(search_filenames) > 20:
             for sf in search_filenames:
                 os.remove(sf)
 
-    with tempfile.NamedTemporaryFile(dir=search_results_dir, suffix=".md", delete=False) as outfile:
+    temp_file_args = {'dir': search_results_dir,
+                      'suffix': ".md",
+                      'delete': False}
+
+    with NamedTemporaryFile(**temp_file_args) as outfile:
 
         # Populate the summary file
         date = datetime.date.fromtimestamp(0.0)
@@ -64,7 +76,8 @@ def view_notes(query, tags_only, show_date, show_tags, edit):
                 if show_date:
 
                     mod_time = mod_times[filename]
-                    new_date = datetime.date.fromtimestamp(time.mktime(mod_times[filename]))
+                    new_date = datetime.date.fromtimestamp(
+                        time.mktime(mod_time))
 
                     if new_date != date:
                         time_str = new_date.strftime("%Y-%m-%d")
@@ -92,7 +105,6 @@ def view_notes(query, tags_only, show_date, show_tags, edit):
 
                 outfile.write('\n\n')
 
-
         # Display and edit summary file
         outfile.seek(0)
 
@@ -111,7 +123,8 @@ def view_notes(query, tags_only, show_date, show_tags, edit):
 
             new_contents = [o.split('\n')[2:-2] for o in text.split(delim)[1:]]
             new_contents = ['\n'.join(nc) for nc in new_contents]
-            lists = zip(orig_contents, new_contents, filenames, stripped_contents)
+            lists = zip(
+                orig_contents, new_contents, filenames, stripped_contents)
 
             for orig, new, filename, stripped in lists:
                 if new != orig:
@@ -123,16 +136,23 @@ def view_notes(query, tags_only, show_date, show_tags, edit):
 
 def main():
     parser = argparse.ArgumentParser(description='Search and edit notes.')
-    parser.add_argument('pattern', nargs='?', default=None, help="Pattern to search for.")
-    parser.add_argument('-t', action='store_true', help="Supply to search only in tags.")
-    parser.add_argument('-s', action='store_true', help="Supply to show tags.")
-    parser.add_argument('-e', action='store_true', help="Supply to enable editing.")
-    parser.add_argument('--hd', default=False, action='store_true', help="Supply to hide dates.")
+    parser.add_argument(
+        'pattern', nargs='?', default=None, help="Pattern to search for.")
+    parser.add_argument(
+        '-t', action='store_true', help="Supply to search only in tags.")
+    parser.add_argument(
+        '-s', action='store_true', help="Supply to show tags.")
+    parser.add_argument(
+        '-e', action='store_true', help="Supply to enable editing.")
+    parser.add_argument(
+        '--hd', default=False, action='store_true',
+        help="Supply to hide dates.")
     argvals = parser.parse_args()
     print "Arguments:", argvals
 
-    view_notes(argvals.pattern, tags_only=argvals.t, show_date=not argvals.hd, show_tags=argvals.s, edit=argvals.e)
+    view_notes(
+        argvals.pattern, tags_only=argvals.t, show_date=not argvals.hd,
+        show_tags=argvals.s, edit=argvals.e)
 
 if __name__ == "__main__":
-	main()
-
+    main()
