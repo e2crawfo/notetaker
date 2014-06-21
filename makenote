@@ -1,9 +1,0 @@
-#!/home/e2crawfo/.virtualenvs/cleanuplearning/bin/python
-
-# -*- coding: utf-8 -*-
-import sys
-
-from make_note import main
-
-if __name__ == '__main__':
-    sys.exit(main())

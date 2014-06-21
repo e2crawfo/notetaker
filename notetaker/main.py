@@ -1,13 +1,19 @@
 import os
 import time
 import datetime
+import string
 from tempfile import NamedTemporaryFile
 import argparse
 from subprocess import check_output, call, CalledProcessError
 import ConfigParser
+import pkg_resources
+import StringIO
+
+config_string = pkg_resources.resource_string(__name__, 'config.ini')
+config_io = StringIO.StringIO(config_string)
 
 config_parser = ConfigParser.SafeConfigParser()
-config_parser.read('config.ini')
+config_parser.readfp(config_io)
 
 note_dir = config_parser.get('common', 'note_directory')
 search_results_dir = config_parser.get('common', 'search_directory')
@@ -15,7 +21,7 @@ delim = config_parser.get('common', 'note_delimiter')
 tag_marker = config_parser.get('common', 'tag_marker')
 
 
-def view_notes(query, tags_only, show_date, show_tags, edit):
+def view_note(query, tags_only, show_date, show_tags, edit):
 
     if not os.path.isdir(note_dir):
         os.mkdir(note_dir)
@@ -134,7 +140,24 @@ def view_notes(query, tags_only, show_date, show_tags, edit):
                         f.write(stripped)
 
 
-def main():
+def make_note(name, tags):
+    date_time_string = str(datetime.datetime.now()).split('.')[0]
+    date_time_string = reduce(
+        lambda y, z: string.replace(y, z, "_"),
+        [date_time_string, ":", ".", " ", "-"])
+
+    filename = note_dir + "/" + name + "_" + date_time_string + ".md"
+    call(['vim', filename])
+
+    with open(filename, 'a') as f:
+        f.write('\n')
+
+        if tags:
+            for tag in tags:
+                f.write(tag_marker + tag + '\n')
+
+
+def view_note_cl():
     parser = argparse.ArgumentParser(description='Search and edit notes.')
     parser.add_argument(
         'pattern', nargs='?', default=None, help="Pattern to search for.")
@@ -150,9 +173,17 @@ def main():
     argvals = parser.parse_args()
     print "Arguments:", argvals
 
-    view_notes(
+    view_note(
         argvals.pattern, tags_only=argvals.t, show_date=not argvals.hd,
         show_tags=argvals.s, edit=argvals.e)
 
-if __name__ == "__main__":
-    main()
+
+def make_note_cl():
+    parser = argparse.ArgumentParser(description='Make a note.')
+    parser.add_argument(
+        'name', nargs='?', default="", help="Name of the note.")
+    parser.add_argument('-t', nargs='*', help="Tags for the note.")
+
+    argvals = parser.parse_args()
+
+    make_note(argvals.name, argvals.t)
