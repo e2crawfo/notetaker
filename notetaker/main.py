@@ -18,6 +18,7 @@ config_parser.readfp(config_io)
 note_dir = config_parser.get('common', 'note_directory')
 search_results_dir = config_parser.get('common', 'search_directory')
 delim = config_parser.get('common', 'note_delimiter')
+pretty_delim = config_parser.get('common', 'pretty_delimiter')
 tag_marker = config_parser.get('common', 'tag_marker')
 
 
@@ -91,9 +92,12 @@ def view_note(query, tags_only, show_date, show_tags, edit):
 
                         date = new_date
 
-                outfile.write('**')
-                outfile.write(delim)
-                outfile.write('**')
+                if edit:
+                    outfile.write('**')
+                    outfile.write(delim)
+                    outfile.write('**')
+                else:
+                    outfile.write(pretty_delim)
 
                 outfile.write('\n\n')
 
