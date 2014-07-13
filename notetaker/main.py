@@ -30,6 +30,39 @@ searcher_args['ack'] = searcher_args['ack-grep']
 searcher_args['ag'] = searcher_args['ack-grep']
 
 
+def get_all_tags(prefix=''):
+    """
+    Find all tags present in the notes folder.
+
+    Parameters
+    ----------
+
+    prefix : str, optional
+        Only tags that begin with prefix will be returned.
+    """
+    query = tag_marker
+
+    searcher_line = [searcher]
+    searcher_line.extend(searcher_args[searcher])
+    searcher_line.extend(["-r", query, note_dir])
+
+    try:
+        searcher_output = check_output(searcher_line)
+
+    except CalledProcessError as e:
+        if e.returncode == 1:
+            print "No tags found."
+            return
+        else:
+            raise e
+
+    tags = searcher_output.split('\n')[:-1]
+    tags = [line.split(tag_marker)[-1].strip() for line in tags]
+    tags = filter(lambda x: x.startswith(prefix), tags)
+
+    return tags
+
+
 def view_note(query, tags_only, show_date, show_tags, edit):
 
     if not os.path.isdir(note_dir):
