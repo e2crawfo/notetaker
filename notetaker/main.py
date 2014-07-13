@@ -21,6 +21,14 @@ delim = config_parser.get('common', 'note_delimiter')
 pretty_delim = config_parser.get('common', 'pretty_delimiter')
 tag_marker = config_parser.get('common', 'tag_marker')
 
+# searcher can be any of: grep, ag, ack-grep
+searcher = config_parser.get('common', 'searcher')
+
+searcher_args = {'grep': [],
+                 'ack-grep': ['--nobreak']}
+searcher_args['ack'] = searcher_args['ack-grep']
+searcher_args['ag'] = searcher_args['ack-grep']
+
 
 def view_note(query, tags_only, show_date, show_tags, edit):
 
@@ -35,7 +43,9 @@ def view_note(query, tags_only, show_date, show_tags, edit):
             query = tag_marker + query
 
         try:
-            grep_output = check_output(["grep", "-R", "-l", query, note_dir])
+            searcher_output = check_output(
+                [searcher, "-R", "-l", query, note_dir])
+
         except CalledProcessError as e:
             if e.returncode == 1:
                 print "No matching files found."
@@ -43,7 +53,7 @@ def view_note(query, tags_only, show_date, show_tags, edit):
             else:
                 raise e
 
-        filenames = grep_output.split('\n')[:-1]
+        filenames = searcher_output.split('\n')[:-1]
 
     stripped_contents = []
     orig_contents = []
