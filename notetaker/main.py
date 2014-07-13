@@ -4,6 +4,7 @@ import datetime
 import string
 from tempfile import NamedTemporaryFile
 import argparse
+import argcomplete
 from subprocess import check_output, call, CalledProcessError
 import ConfigParser
 import pkg_resources
@@ -206,8 +207,11 @@ def make_note(name, tags):
 
 def view_note_cl():
     parser = argparse.ArgumentParser(description='Search and edit notes.')
-    parser.add_argument(
+
+    arg = parser.add_argument(
         'pattern', nargs='?', default=None, help="Pattern to search for.")
+    arg.completer = lambda prefix, **kwargs: get_all_tags(prefix)
+
     parser.add_argument(
         '-t', action='store_true', help="Supply to search only in tags.")
     parser.add_argument(
@@ -217,8 +221,10 @@ def view_note_cl():
     parser.add_argument(
         '--hd', default=False, action='store_true',
         help="Supply to hide dates.")
+
+    argcomplete.autocomplete(parser)
+
     argvals = parser.parse_args()
-    print "Arguments:", argvals
 
     view_note(
         argvals.pattern, tags_only=argvals.t, show_date=not argvals.hd,
@@ -227,10 +233,21 @@ def view_note_cl():
 
 def make_note_cl():
     parser = argparse.ArgumentParser(description='Make a note.')
-    parser.add_argument(
+
+    arg = parser.add_argument(
         'name', nargs='?', default="", help="Name of the note.")
-    parser.add_argument('-t', nargs='*', help="Tags for the note.")
+
+    arg = parser.add_argument('-t', nargs='*', help="Tags for the note.")
+    arg.completer = lambda prefix, **kwargs: get_all_tags(prefix)
+
+    argcomplete.autocomplete(parser)
 
     argvals = parser.parse_args()
 
     make_note(argvals.name, argvals.t)
+
+if __name__ == "__main__":
+
+    # Calling these makes argcomplete work.
+    make_note_cl()
+    view_note_cl()
