@@ -26,5 +26,6 @@ setup(
     entry_points={
         'console_scripts': [
             'viewnote=notetaker:view_note_cl',
-            'makenote=notetaker:make_note_cl']}
+            'makenote=notetaker:make_note_cl']},
+    package_data={'notetaker': ['config.ini']}
 )
