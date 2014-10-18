@@ -209,7 +209,10 @@ def view_note_cl():
     parser = argparse.ArgumentParser(description='Search and edit notes.')
 
     arg = parser.add_argument(
-        'pattern', nargs='?', default=None, help="Pattern to search for.")
+        'pattern', nargs='?', default=None,
+        help="Pattern to search for. Can make use of regex patterns, "
+             "just put the pattern in single quotes.")
+
     arg.completer = lambda prefix, **kwargs: get_all_tags(prefix)
 
     parser.add_argument(
