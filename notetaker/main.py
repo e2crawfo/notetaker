@@ -164,7 +164,7 @@ def view_note(query, tags_only, show_date, show_tags, edit):
 
         try:
             if not edit:
-                call(['chromium-browser', outfile.name])
+                call(['google-chrome', outfile.name])
             else:
                 call(['retext', outfile.name])
         except Exception as e:
