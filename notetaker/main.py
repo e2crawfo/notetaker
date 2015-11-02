@@ -18,8 +18,7 @@ config_parser.readfp(config_io)
 
 note_dir = config_parser.get('common', 'note_directory')
 search_results_dir = config_parser.get('common', 'search_directory')
-delim = config_parser.get('common', 'note_delimiter')
-pretty_delim = config_parser.get('common', 'pretty_delimiter')
+delim = config_parser.get('common', 'delimiter')
 tag_marker = config_parser.get('common', 'tag_marker')
 
 # searcher can be any of: grep, ag, ack-grep
@@ -37,9 +36,9 @@ def get_all_tags(prefix=''):
 
     Parameters
     ----------
-
     prefix : str, optional
         Only tags that begin with prefix will be returned.
+
     """
     query = tag_marker
 
@@ -64,11 +63,12 @@ def get_all_tags(prefix=''):
     return tags
 
 
-def view_note(query, tags_only, show_date, show_tags, edit):
+def view_note(query, tags_only, show_date, show_tags, viewer):
 
     if not os.path.isdir(note_dir):
         os.mkdir(note_dir)
 
+    # Get the files to compose the summary file from
     if query is None:
         filenames = [os.path.join(note_dir, f) for f in os.listdir(note_dir)]
         filenames = filter(lambda f: os.path.isfile(f), filenames)
@@ -89,13 +89,11 @@ def view_note(query, tags_only, show_date, show_tags, edit):
 
         filenames = searcher_output.split('\n')[:-1]
 
-    stripped_contents = []
-    orig_contents = []
-
     # Sort filenames by modification time
     mod_times = {}
     for filename in filenames:
-        mod_time = time.gmtime(os.path.getmtime(filename))
+        mod_time = datetime.datetime.utcfromtimestamp(
+            os.path.getmtime(filename))
         mod_times[filename] = mod_time
 
     filenames.sort(key=lambda f: mod_times[f])
@@ -103,8 +101,10 @@ def view_note(query, tags_only, show_date, show_tags, edit):
     if not os.path.isdir(search_results_dir):
         os.mkdir(search_results_dir)
     else:
-        search_filenames = [os.path.join(search_results_dir, f)
-                            for f in os.listdir(search_results_dir)]
+        search_filenames = [
+            os.path.join(search_results_dir, f)
+            for f in os.listdir(search_results_dir)]
+
         search_filenames = filter(
             lambda f: os.path.isfile(f), search_filenames)
 
@@ -115,77 +115,82 @@ def view_note(query, tags_only, show_date, show_tags, edit):
     temp_file_args = {'dir': search_results_dir,
                       'suffix': ".md",
                       'delete': False}
+    date_prefix = "## Journal: "
 
-    with NamedTemporaryFile(**temp_file_args) as outfile:
+    try:
+        stripped_contents = []
+        orig_contents = []
 
         # Populate the summary file
-        date = datetime.date.fromtimestamp(0.0)
+        with NamedTemporaryFile(**temp_file_args) as outfile:
+            date = datetime.date.fromtimestamp(0.0)
 
-        for filename in filenames:
-            with open(filename, 'r') as f:
+            for filename in filenames:
+                with open(filename, 'r') as f:
+                    if show_date:
+                        mod_time = mod_times[filename]
+                        new_date = mod_time.date()
 
-                if show_date:
+                        if new_date != date:
+                            time_str = new_date.strftime("%Y-%m-%d")
+                            outfile.write(date_prefix + str(time_str) + '\n')
 
-                    mod_time = mod_times[filename]
-                    new_date = datetime.date.fromtimestamp(
-                        time.mktime(mod_time))
+                            date = new_date
 
-                    if new_date != date:
-                        time_str = new_date.strftime("%Y-%m-%d")
-                        outfile.write("## Journal: " + str(time_str) + '\n')
-
-                        date = new_date
-
-                if edit:
-                    outfile.write('**')
                     outfile.write(delim)
-                    outfile.write('**')
-                else:
-                    outfile.write(pretty_delim)
+                    outfile.write('\n\n')
 
-                outfile.write('\n\n')
+                    contents = f.read()
 
-                contents = f.read()
+                    if not show_tags:
+                        contents = contents.partition(tag_marker)
+                        stripped_contents.append(contents[1] + contents[2])
+                        contents = contents[0]
+                    else:
+                        stripped_contents.append("")
 
-                if not show_tags:
-                    contents = contents.partition(tag_marker)
-                    stripped_contents.append(contents[1] + contents[2])
-                    contents = contents[0]
-                else:
-                    stripped_contents.append("")
+                    contents = contents.strip()
+                    orig_contents.append(contents)
+                    outfile.write(contents)
 
-                orig_contents.append(contents)
-                outfile.write(contents)
+                    outfile.write('\n\n')
 
-                outfile.write('\n\n')
+        outfile_mod_time = time.gmtime(os.path.getmtime(outfile.name))
+        call([viewer, outfile.name])
+        new_outfile_mod_time = time.gmtime(os.path.getmtime(outfile.name))
 
-        # Display and edit summary file
-        outfile.seek(0)
+        if new_outfile_mod_time > outfile_mod_time:
+            with open(outfile.name, 'r') as results:
+                # Write edits
+                text = results.read()
 
+                new_contents = [o.split('\n') for o in text.split(delim)[1:]]
+                new_contents = [
+                    filter(lambda x: not x.startswith(date_prefix), nc)
+                    for nc in new_contents]
+                new_contents = ['\n'.join(nc).strip() for nc in new_contents]
+
+                lists = zip(
+                    orig_contents, new_contents, filenames, stripped_contents)
+                for orig, new, filename, stripped in lists:
+                    if new != orig:
+                        import pdb
+                        pdb.set_trace()
+
+                        print "Writing to ", filename
+                        atime = os.path.getatime(filename)
+                        mtime = os.path.getmtime(filename)
+
+                        with open(filename, 'w') as f:
+                            f.write(new)
+                            f.write(stripped)
+
+                        os.utime(filename, (atime, mtime))
+    finally:
         try:
-            if not edit:
-                call(['google-chrome', outfile.name])
-            else:
-                call(['retext', outfile.name])
-        except Exception as e:
-            print e
-            call(['vim', outfile.name])
-
-        if edit:
-            # Write edits
-            text = outfile.read()
-
-            new_contents = [o.split('\n')[2:-2] for o in text.split(delim)[1:]]
-            new_contents = ['\n'.join(nc) for nc in new_contents]
-            lists = zip(
-                orig_contents, new_contents, filenames, stripped_contents)
-
-            for orig, new, filename, stripped in lists:
-                if new != orig:
-                    print "Writing to ", filename
-                    with open(filename, 'w') as f:
-                        f.write(new)
-                        f.write(stripped)
+            os.remove(outfile.name)
+        except:
+            pass
 
 
 def make_note(name, tags):
@@ -200,9 +205,8 @@ def make_note(name, tags):
     with open(filename, 'a') as f:
         f.write('\n')
 
-        if tags:
-            for tag in tags:
-                f.write(tag_marker + tag + '\n')
+        for tag in tags:
+            f.write(tag_marker + tag + '\n')
 
 
 def view_note_cl():
@@ -220,7 +224,8 @@ def view_note_cl():
     parser.add_argument(
         '-s', action='store_true', help="Supply to show tags.")
     parser.add_argument(
-        '-e', action='store_true', help="Supply to enable editing.")
+        '--viewer', default='vim',
+        help="The program used to view search results. Defaults to: vim.")
     parser.add_argument(
         '--hd', default=False, action='store_true',
         help="Supply to hide dates.")
@@ -231,7 +236,7 @@ def view_note_cl():
 
     view_note(
         argvals.pattern, tags_only=argvals.t, show_date=not argvals.hd,
-        show_tags=argvals.s, edit=argvals.e)
+        show_tags=argvals.s, viewer=argvals.viewer)
 
 
 def make_note_cl():
