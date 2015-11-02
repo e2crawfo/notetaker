@@ -174,9 +174,6 @@ def view_note(query, tags_only, show_date, show_tags, viewer):
                     orig_contents, new_contents, filenames, stripped_contents)
                 for orig, new, filename, stripped in lists:
                     if new != orig:
-                        import pdb
-                        pdb.set_trace()
-
                         print "Writing to ", filename
                         atime = os.path.getatime(filename)
                         mtime = os.path.getmtime(filename)
