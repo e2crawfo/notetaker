@@ -239,7 +239,7 @@ def view_note_cl():
 def make_note_cl():
     parser = argparse.ArgumentParser(description='Make a note.')
 
-    arg = parser.add_argument(
+    parser.add_argument(
         'name', nargs='?', default="", help="Name of the note.")
 
     arg = parser.add_argument('-t', nargs='*', help="Tags for the note.")
@@ -249,7 +249,8 @@ def make_note_cl():
 
     argvals = parser.parse_args()
 
-    make_note(argvals.name, argvals.t)
+    tags = [] if argvals.t is None else argvals.t
+    make_note(argvals.name, tags)
 
 if __name__ == "__main__":
 
