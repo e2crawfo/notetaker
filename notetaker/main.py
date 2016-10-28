@@ -63,31 +63,10 @@ def get_all_tags(prefix=''):
     return tags
 
 
-def view_note(query, tags_only, show_date, show_tags, viewer):
+def view_notes(filenames, show_date, show_tags, viewer):
 
     if not os.path.isdir(note_dir):
         os.mkdir(note_dir)
-
-    # Get the files to compose the summary file from
-    if query is None:
-        filenames = [os.path.join(note_dir, f) for f in os.listdir(note_dir)]
-        filenames = filter(lambda f: os.path.isfile(f), filenames)
-    else:
-        if tags_only:
-            query = tag_marker + query
-
-        try:
-            searcher_output = check_output(
-                [searcher, "-R", "-l", query, note_dir])
-
-        except CalledProcessError as e:
-            if e.returncode == 1:
-                print "No matching files found."
-                return
-            else:
-                raise e
-
-        filenames = searcher_output.split('\n')[:-1]
 
     # Sort filenames by modification time
     mod_times = {}
@@ -159,9 +138,9 @@ def view_note(query, tags_only, show_date, show_tags, viewer):
         call([viewer, outfile.name])
         new_outfile_mod_time = time.gmtime(os.path.getmtime(outfile.name))
 
+        # Write edits
         if new_outfile_mod_time > outfile_mod_time:
             with open(outfile.name, 'r') as results:
-                # Write edits
                 text = results.read()
 
                 new_contents = [o.split('\n') for o in text.split(delim)[1:]]
@@ -206,50 +185,136 @@ def make_note(name, tags):
             f.write(tag_marker + tag + '\n')
 
 
+def search_view(args):
+    # Get the files to compose the summary file from by searching.
+    command = '%s -R -l %s %s' % (searcher, args.pattern, note_dir)
+    try:
+        searcher_output = check_output(command.split())
+
+    except CalledProcessError as e:
+        if e.returncode == 1:
+            print "No matching files found."
+            return
+        else:
+            raise e
+    filenames = searcher_output.split('\n')[:-1]
+    if not filenames:
+        print "No matching files found."
+        return
+
+    # View the chosen files
+    view_notes(
+        filenames, show_date=not args.no_date,
+        show_tags=args.show_tags, viewer=args.viewer)
+
+
+def date_view(args):
+    # Get the files to compose the summary file from using a date range.
+    command = [
+        'find', note_dir, '-type', 'f',
+        '-newermt', args.frm, '-not', '-newermt', args.to]
+
+    try:
+        find_output = check_output(command)
+
+    except CalledProcessError as e:
+        if e.returncode == 1:
+            print "No matching files found."
+            return
+        else:
+            raise e
+    filenames = find_output.split('\n')[:-1]
+    if not filenames:
+        print "No matching files found."
+        return
+
+    # View the chosen files
+    view_notes(
+        filenames, show_date=not args.no_date,
+        show_tags=args.show_tags, viewer=args.viewer)
+
+
+def tail_view(args):
+    # Get the files to compose the summary file from
+    command = 'ls -t1 %s' % note_dir
+
+    try:
+        sorted_filenames = check_output(command.split())
+    except CalledProcessError as e:
+        if e.returncode == 1:
+            print "No matching files found."
+            return
+        else:
+            raise e
+    filenames = sorted_filenames.split('\n')[:-1]
+    filenames = filenames[:args.n]
+    filenames = [os.path.join(note_dir, fn) for fn in filenames]
+    if not filenames:
+        print "No matching files found."
+        return
+
+    # View the chosen files
+    view_notes(
+        filenames, show_date=not args.no_date,
+        show_tags=args.show_tags, viewer=args.viewer)
+
+
 def view_note_cl():
-    parser = argparse.ArgumentParser(description='Search and edit notes.')
+    parser = argparse.ArgumentParser(description='View and edit notes.')
 
-    arg = parser.add_argument(
-        'pattern', nargs='?', default=None,
-        help="Pattern to search for. Can make use of regex patterns, "
-             "just put the pattern in single quotes.")
+    subparsers = parser.add_subparsers()
 
+    search_parser = subparsers.add_parser(
+        'search', help='View notes whose contents match the given pattern.')
+    arg = search_parser.add_argument('pattern', type=str)
     arg.completer = lambda prefix, **kwargs: get_all_tags(prefix)
+    search_parser.set_defaults(func=search_view)
+
+    date_parser = subparsers.add_parser(
+        'date', help='View notes whose most recent modification '
+                     'time matches the given range of dates. Dates '
+                     'are interpreted in the same manner as the `-d` '
+                     'option of GNU `date`.')
+    date_parser.add_argument(
+        '--from', dest='frm', type=str, default='@0',
+        help='Start of the date range.')
+    date_parser.add_argument(
+        '--to', type=str, default='now', help='End of date range.')
+    date_parser.set_defaults(func=date_view)
+
+    tail_parser = subparsers.add_parser(
+        'tail', help='View most recent ``n`` notes.')
+    tail_parser.add_argument('n', nargs='?', type=int, default=1)
+    tail_parser.set_defaults(func=tail_view)
 
     parser.add_argument(
-        '-t', action='store_true', help="Supply to search only in tags.")
-    parser.add_argument(
-        '-s', action='store_true', help="Supply to show tags.")
+        '--show-tags', action='store_true', help="Supply to show tags.")
     parser.add_argument(
         '--viewer', default='vim',
         help="The program used to view search results. Defaults to: vim.")
     parser.add_argument(
-        '--hd', default=False, action='store_true',
+        '--no-date', default=False, action='store_true',
         help="Supply to hide dates.")
 
     argcomplete.autocomplete(parser)
 
-    argvals = parser.parse_args()
-
-    view_note(
-        argvals.pattern, tags_only=argvals.t, show_date=not argvals.hd,
-        show_tags=argvals.s, viewer=argvals.viewer)
+    args = parser.parse_args()
+    args.func(args)
 
 
 def make_note_cl():
     parser = argparse.ArgumentParser(description='Make a note.')
 
     parser.add_argument(
-        'name', nargs='?', default="", help="Name of the note.")
-
-    arg = parser.add_argument('-t', nargs='*', help="Tags for the note.")
+        '--name', type=str, default="", help="Name of the note.")
+    arg = parser.add_argument('tags', nargs='*', help="Tags for the note.")
     arg.completer = lambda prefix, **kwargs: get_all_tags(prefix)
 
     argcomplete.autocomplete(parser)
 
     argvals = parser.parse_args()
 
-    tags = [] if argvals.t is None else argvals.t
+    tags = [] if argvals.tags is None else argvals.tags
     make_note(argvals.name, tags)
 
 if __name__ == "__main__":
