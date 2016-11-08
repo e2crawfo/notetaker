@@ -1,5 +1,6 @@
 import os
 import time
+import sys
 import datetime
 import string
 from tempfile import NamedTemporaryFile
@@ -28,6 +29,46 @@ searcher_args = {'grep': [],
                  'ack-grep': ['--nobreak']}
 searcher_args['ack'] = searcher_args['ack-grep']
 searcher_args['ag'] = searcher_args['ack-grep']
+
+
+def set_default_subparser(self, name, args=None):
+    """
+    Default subparser selection. Call after setup, just before parse_args()
+    Taken from: http://stackoverflow.com/questions/6365601/default-
+                sub-command-or-handling-no-sub-command-with-argparse
+
+    Parameters
+    ----------
+    name: str
+        The name of the subparser to call by default.
+    args: str
+        If set, is the argument list handed to parse_args()
+
+    Tested with 2.7, 3.2, 3.3, 3.4.
+    It works with 2.6 assuming argparse is installed.
+
+    """
+    subparser_found = False
+    for arg in sys.argv[1:]:
+        if arg in ['-h', '--help']:  # global help if no subparser
+            break
+    else:
+        for x in self._subparsers._actions:
+            if not isinstance(x, argparse._SubParsersAction):
+                continue
+            for sp_name in x._name_parser_map.keys():
+                if sp_name in sys.argv[1:]:
+                    subparser_found = True
+        if not subparser_found:
+            # insert default in first position, this implies no
+            # global options without a sub_parsers specified
+            if args is None:
+                sys.argv.insert(1, name)
+            else:
+                args.insert(0, name)
+
+
+argparse.ArgumentParser.set_default_subparser = set_default_subparser
 
 
 def get_all_tags(prefix=''):
@@ -297,6 +338,8 @@ def view_note_cl():
         help="Supply to hide dates.")
 
     argcomplete.autocomplete(parser)
+
+    parser.set_default_subparser('search')
 
     args = parser.parse_args()
     args.func(args)
