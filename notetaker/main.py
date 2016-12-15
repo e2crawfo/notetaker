@@ -119,7 +119,7 @@ def get_all_tags(prefix=''):
     return tags
 
 
-def view_notes(filenames, show_date, show_tags, viewer):
+def view_notes(filenames, show_date, show_tags, viewer, verbose):
 
     if not os.path.isdir(note_dir):
         os.mkdir(note_dir)
@@ -132,6 +132,12 @@ def view_notes(filenames, show_date, show_tags, viewer):
         mod_times[filename] = mod_time
 
     filenames.sort(key=lambda f: mod_times[f])
+
+    print("Viewing {n} files.".format(n=len(filenames)))
+
+    if verbose > 0:
+        for f in filenames:
+            print(f)
 
     if not os.path.isdir(summary_dir):
         os.mkdir(summary_dir)
@@ -194,6 +200,8 @@ def view_notes(filenames, show_date, show_tags, viewer):
         call([viewer, outfile.name])
         new_outfile_mod_time = time.gmtime(os.path.getmtime(outfile.name))
 
+        n_writes = 0
+
         # Write edits
         if new_outfile_mod_time > outfile_mod_time:
             with io.open(outfile.name, 'r') as results:
@@ -209,7 +217,9 @@ def view_notes(filenames, show_date, show_tags, viewer):
                     orig_contents, new_contents, filenames, stripped_contents)
                 for orig, new, filename, stripped in lists:
                     if new != orig:
-                        print("Writing to " + filename)
+                        if verbose > 0:
+                            print("Writing to " + filename + ".")
+
                         atime = os.path.getatime(filename)
                         mtime = os.path.getmtime(filename)
 
@@ -218,6 +228,10 @@ def view_notes(filenames, show_date, show_tags, viewer):
                             f.write(stripped)
 
                         os.utime(filename, (atime, mtime))
+                        n_writes += 1
+
+        print("Wrote to {n} files.".format(n=n_writes))
+
     finally:
         try:
             os.remove(outfile.name)
@@ -225,10 +239,13 @@ def view_notes(filenames, show_date, show_tags, viewer):
             pass
 
 
-def make_note(name, tags):
+def make_note(name, tags, verbose):
     date_time_string = str(datetime.datetime.now()).split('.')[0]
     for c in [":", ".", " ", "-"]:
         date_time_string = date_time_string.replace(c, '_')
+
+    if name is None:
+        name = '_'.join(tags)
 
     filename = note_dir + "/" + name + "_" + date_time_string + ".md"
     call(['vim', filename])
@@ -238,6 +255,9 @@ def make_note(name, tags):
 
         for tag in tags:
             f.write(tag_marker + tag + newline)
+
+    if verbose > 0:
+        print("Saved as {filename}".format(filename=filename))
 
 
 def search_view(args):
@@ -262,7 +282,8 @@ def search_view(args):
     # View the chosen files
     view_notes(
         filenames, show_date=not args.no_date,
-        show_tags=args.show_tags, viewer=args.viewer)
+        show_tags=args.show_tags, viewer=args.viewer,
+        verbose=args.verbose)
 
 
 def date_view(args):
@@ -290,7 +311,8 @@ def date_view(args):
     # View the chosen files
     view_notes(
         filenames, show_date=not args.no_date,
-        show_tags=args.show_tags, viewer=args.viewer)
+        show_tags=args.show_tags, viewer=args.viewer,
+        verbose=args.verbose)
 
 
 def tail_view(args):
@@ -317,21 +339,39 @@ def tail_view(args):
     # View the chosen files
     view_notes(
         filenames, show_date=not args.no_date,
-        show_tags=args.show_tags, viewer=args.viewer)
+        show_tags=args.show_tags, viewer=args.viewer,
+        verbose=args.verbose)
 
 
 def view_note_cl():
-    parser = argparse.ArgumentParser(description='View and edit notes.')
+    parser = argparse.ArgumentParser(
+        description='View and edit notes. The default value for '
+                    'the positional argument is \'search\'. If a value '
+                    'for this argument is explicitly supplied, then the '
+                    'top-level optional arguments must come before it. If '
+                    'a value is not explicitly supplied, then top-level '
+                    'optional arguments cannot be supplied.\n\n'
+                    'Type \'viewnote <command> -h\' to see arguments specific '
+                    'to that command.')
+
+    parser.add_argument(
+        '--show-tags', action='store_true', help="Supply to show tags.")
+    parser.add_argument(
+        '--viewer', default='vim',
+        help="The program used to view search results. Defaults to: vim.")
+    parser.add_argument(
+        '--no-date', default=False, action='store_true',
+        help="Supply to hide dates.")
+    parser.add_argument(
+        '-v', '--verbose', action='count', default=0, help="Increase verbosity.")
 
     subparsers = parser.add_subparsers()
 
     search_parser = subparsers.add_parser(
         'search', help='View notes whose contents match the given pattern.')
-
     arg = search_parser.add_argument('pattern', type=str)
+    # arg.completer = lambda prefix, **kwargs: get_all_tags(prefix)
     search_parser.set_defaults(func=search_view)
-
-    arg.completer = lambda prefix, **kwargs: get_all_tags(prefix)
 
     date_parser = subparsers.add_parser(
         'date', help='View notes whose most recent modification '
@@ -350,16 +390,7 @@ def view_note_cl():
     tail_parser.add_argument('n', nargs='?', type=int, default=1)
     tail_parser.set_defaults(func=tail_view)
 
-    parser.add_argument(
-        '--show-tags', action='store_true', help="Supply to show tags.")
-    parser.add_argument(
-        '--viewer', default='vim',
-        help="The program used to view search results. Defaults to: vim.")
-    parser.add_argument(
-        '--no-date', default=False, action='store_true',
-        help="Supply to hide dates.")
-
-    argcomplete.autocomplete(parser)
+    # argcomplete.autocomplete(parser)
 
     parser.set_default_subparser('search')
 
@@ -371,16 +402,16 @@ def make_note_cl():
     parser = argparse.ArgumentParser(description='Make a note.')
 
     parser.add_argument(
-        '--name', type=str, default="", help="Name of the note.")
+        '--name', type=str, help="Name of the note.")
+    parser.add_argument( '--verbose', '-v', action='count', help="Increase verbosity.")
     arg = parser.add_argument('tags', nargs='*', help="Tags for the note.")
-    arg.completer = lambda prefix, **kwargs: get_all_tags(prefix)
+    # arg.completer = lambda prefix, **kwargs: get_all_tags(prefix)
+    # argcomplete.autocomplete(parser)
 
-    argcomplete.autocomplete(parser)
+    args = parser.parse_args()
 
-    argvals = parser.parse_args()
-
-    tags = [] if argvals.tags is None else argvals.tags
-    make_note(argvals.name, tags)
+    tags = args.tags or []
+    make_note(args.name, tags, args.verbose)
 
 if __name__ == "__main__":
 
