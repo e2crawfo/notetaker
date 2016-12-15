@@ -13,8 +13,12 @@ import io
 from six.moves.configparser import SafeConfigParser
 from six import StringIO, u
 
+ENCODING = u('utf-8')
+NEWLINE = u('\n')
+DATE_PREFIX = u("## Journal: ")
+
 config_string = pkg_resources.resource_string(__name__, 'config.ini')
-config_io = StringIO(config_string.decode('utf-8'))
+config_io = StringIO(config_string.decode(ENCODING))
 
 config_parser = SafeConfigParser()
 config_parser.readfp(config_io)
@@ -32,16 +36,13 @@ searcher_args = {'grep': [],
 searcher_args['ack'] = searcher_args['ack-grep']
 searcher_args['ag'] = searcher_args['ack-grep']
 
-newline = u('\n')
-date_prefix = u("## Journal: ")
-
 
 if sys.version_info[0] > 2:
     def uwriter(fp):
         return fp
 else:
     def uwriter(fp):
-        return codecs.getwriter('utf-8')(fp)
+        return codecs.getwriter(ENCODING)(fp)
 
 
 def set_default_subparser(self, name, args=None):
@@ -109,9 +110,9 @@ def get_all_tags(prefix=''):
             return
         else:
             raise e
-    searcher_output = b_searcher_output.encode('utf-8')
+    searcher_output = b_searcher_output.encode(ENCODING)
 
-    tags = searcher_output.split(newline)[:-2]
+    tags = searcher_output.split(NEWLINE)[:-2]
     tags = [line.split(tag_marker)[-1].strip() for line in tags]
     tags = [t for t in tags if t.startswith(prefix)]
 
@@ -173,12 +174,12 @@ def view_notes(filenames, show_date, show_tags, viewer, verbose):
 
                         if new_date != date:
                             time_str = new_date.strftime("%Y-%m-%d")
-                            outfile.write(date_prefix + str(time_str) + newline)
+                            outfile.write(DATE_PREFIX + str(time_str) + NEWLINE)
 
                             date = new_date
 
                     outfile.write(delim)
-                    outfile.write(newline)
+                    outfile.write(NEWLINE)
 
                     contents = f.read()
 
@@ -193,7 +194,7 @@ def view_notes(filenames, show_date, show_tags, viewer, verbose):
                     orig_contents.append(contents)
                     outfile.write(contents)
 
-                    outfile.write(newline + newline)
+                    outfile.write(NEWLINE + NEWLINE)
 
         outfile_mod_time = time.gmtime(os.path.getmtime(outfile.name))
         call([viewer, outfile.name])
@@ -206,11 +207,11 @@ def view_notes(filenames, show_date, show_tags, viewer, verbose):
             with io.open(outfile.name, 'r') as results:
                 text = results.read()
 
-                new_contents = [o.split(newline) for o in text.split(delim)[1:]]
+                new_contents = [o.split(NEWLINE) for o in text.split(delim)[1:]]
                 new_contents = [
-                    [n for n in nc if not n.startswith(date_prefix)]
+                    [n for n in nc if not n.startswith(DATE_PREFIX)]
                     for nc in new_contents]
-                new_contents = [newline.join(nc).strip() for nc in new_contents]
+                new_contents = [NEWLINE.join(nc).strip() for nc in new_contents]
 
                 lists = zip(
                     orig_contents, new_contents, filenames, stripped_contents)
@@ -250,10 +251,10 @@ def make_note(name, tags, verbose):
     call(['vim', filename])
 
     with io.open(filename, 'a') as f:
-        f.write(newline)
+        f.write(NEWLINE)
 
         for tag in tags:
-            f.write(tag_marker + tag + newline)
+            f.write(tag_marker + tag + NEWLINE)
 
     if verbose > 0:
         print("Saved as {filename}".format(filename=filename))
@@ -271,9 +272,9 @@ def search_view(args):
             return
         else:
             raise e
-    searcher_output = b_searcher_output.decode('utf-8')
+    searcher_output = b_searcher_output.decode(ENCODING)
 
-    filenames = searcher_output.split(newline)[:-1]
+    filenames = searcher_output.split(NEWLINE)[:-1]
     if not filenames:
         print("No matching files found.")
         return
@@ -300,9 +301,9 @@ def date_view(args):
             return
         else:
             raise e
-    find_output = b_find_output.decode('utf-8')
+    find_output = b_find_output.decode(ENCODING)
 
-    filenames = find_output.split(newline)[:-1]
+    filenames = find_output.split(NEWLINE)[:-1]
     if not filenames:
         print("No matching files found.")
         return
@@ -326,9 +327,9 @@ def tail_view(args):
             return
         else:
             raise e
-    sorted_filenames = b_sorted_filenames.decode('utf-8')
+    sorted_filenames = b_sorted_filenames.decode(ENCODING)
 
-    filenames = sorted_filenames.split(newline)[:-1]
+    filenames = sorted_filenames.split(NEWLINE)[:-1]
     filenames = filenames[:args.n]
     filenames = [os.path.join(note_dir, fn) for fn in filenames]
     if not filenames:
