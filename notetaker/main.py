@@ -400,7 +400,8 @@ def make_note_cl():
 
     parser.add_argument(
         '--name', type=str, help="Name of the note.")
-    parser.add_argument( '--verbose', '-v', action='count', help="Increase verbosity.")
+    parser.add_argument(
+        '-v', '--verbose', action='count', default=0, help="Increase verbosity.")
     arg = parser.add_argument('tags', nargs='*', help="Tags for the note.")
     args = parser.parse_args()
 
