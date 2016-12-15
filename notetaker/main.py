@@ -1,20 +1,23 @@
+from __future__ import print_function
 import os
-import time
 import sys
+import time
+import codecs
 import datetime
 import string
 from tempfile import NamedTemporaryFile
 import argparse
 import argcomplete
 from subprocess import check_output, call, CalledProcessError
-import ConfigParser
 import pkg_resources
-import StringIO
+import io
+from six.moves.configparser import SafeConfigParser
+from six import StringIO, u
 
 config_string = pkg_resources.resource_string(__name__, 'config.ini')
-config_io = StringIO.StringIO(config_string)
+config_io = StringIO(config_string.decode('utf-8'))
 
-config_parser = ConfigParser.SafeConfigParser()
+config_parser = SafeConfigParser()
 config_parser.readfp(config_io)
 
 note_dir = config_parser.get('common', 'note_directory')
@@ -29,6 +32,17 @@ searcher_args = {'grep': [],
                  'ack-grep': ['--nobreak']}
 searcher_args['ack'] = searcher_args['ack-grep']
 searcher_args['ag'] = searcher_args['ack-grep']
+
+newline = u('\n')
+date_prefix = u("## Journal: ")
+
+
+if sys.version_info[0] > 2:
+    def uwriter(fp):
+        return fp
+else:
+    def uwriter(fp):
+        return codecs.getwriter('utf-8')(fp)
 
 
 def set_default_subparser(self, name, args=None):
@@ -88,18 +102,19 @@ def get_all_tags(prefix=''):
     searcher_line.extend(["-r", query, note_dir])
 
     try:
-        searcher_output = check_output(searcher_line)
+        b_searcher_output = check_output(searcher_line)
 
     except CalledProcessError as e:
         if e.returncode == 1:
-            print "No tags found."
+            print("No tags found.")
             return
         else:
             raise e
+    searcher_output = b_searcher_output.encode('utf-8')
 
-    tags = searcher_output.split('\n')[:-1]
+    tags = searcher_output.split(newline)[:-2]
     tags = [line.split(tag_marker)[-1].strip() for line in tags]
-    tags = filter(lambda x: x.startswith(prefix), tags)
+    tags = [t for t in tags if t.startswith(prefix)]
 
     return tags
 
@@ -125,40 +140,40 @@ def view_notes(filenames, show_date, show_tags, viewer):
             os.path.join(search_results_dir, f)
             for f in os.listdir(search_results_dir)]
 
-        search_filenames = filter(
-            lambda f: os.path.isfile(f), search_filenames)
+        search_filenames = [
+            f for f in search_filenames if os.path.isfile(f)]
 
         if len(search_filenames) > 20:
             for sf in search_filenames:
                 os.remove(sf)
 
-    temp_file_args = {'dir': search_results_dir,
+    temp_file_args = {'mode': 'w',
+                      'dir': search_results_dir,
                       'suffix': ".md",
                       'delete': False}
-    date_prefix = "## Journal: "
 
     try:
         stripped_contents = []
         orig_contents = []
 
         # Populate the summary file
-        with NamedTemporaryFile(**temp_file_args) as outfile:
+        with uwriter(NamedTemporaryFile(**temp_file_args)) as outfile:
             date = datetime.date.fromtimestamp(0.0)
 
             for filename in filenames:
-                with open(filename, 'r') as f:
+                with io.open(filename, 'r') as f:
                     if show_date:
                         mod_time = mod_times[filename]
                         new_date = mod_time.date()
 
                         if new_date != date:
                             time_str = new_date.strftime("%Y-%m-%d")
-                            outfile.write(date_prefix + str(time_str) + '\n')
+                            outfile.write(date_prefix + str(time_str) + newline)
 
                             date = new_date
 
                     outfile.write(delim)
-                    outfile.write('\n\n')
+                    outfile.write(newline)
 
                     contents = f.read()
 
@@ -173,7 +188,7 @@ def view_notes(filenames, show_date, show_tags, viewer):
                     orig_contents.append(contents)
                     outfile.write(contents)
 
-                    outfile.write('\n\n')
+                    outfile.write(newline + newline)
 
         outfile_mod_time = time.gmtime(os.path.getmtime(outfile.name))
         call([viewer, outfile.name])
@@ -181,24 +196,24 @@ def view_notes(filenames, show_date, show_tags, viewer):
 
         # Write edits
         if new_outfile_mod_time > outfile_mod_time:
-            with open(outfile.name, 'r') as results:
+            with io.open(outfile.name, 'r') as results:
                 text = results.read()
 
-                new_contents = [o.split('\n') for o in text.split(delim)[1:]]
+                new_contents = [o.split(newline) for o in text.split(delim)[1:]]
                 new_contents = [
-                    filter(lambda x: not x.startswith(date_prefix), nc)
+                    [n for n in nc if not n.startswith(date_prefix)]
                     for nc in new_contents]
-                new_contents = ['\n'.join(nc).strip() for nc in new_contents]
+                new_contents = [newline.join(nc).strip() for nc in new_contents]
 
                 lists = zip(
                     orig_contents, new_contents, filenames, stripped_contents)
                 for orig, new, filename, stripped in lists:
                     if new != orig:
-                        print "Writing to ", filename
+                        print("Writing to " + filename)
                         atime = os.path.getatime(filename)
                         mtime = os.path.getmtime(filename)
 
-                        with open(filename, 'w') as f:
+                        with io.open(filename, 'w') as f:
                             f.write(new)
                             f.write(stripped)
 
@@ -212,35 +227,36 @@ def view_notes(filenames, show_date, show_tags, viewer):
 
 def make_note(name, tags):
     date_time_string = str(datetime.datetime.now()).split('.')[0]
-    date_time_string = reduce(
-        lambda y, z: string.replace(y, z, "_"),
-        [date_time_string, ":", ".", " ", "-"])
+    for c in [":", ".", " ", "-"]:
+        date_time_string = date_time_string.replace(c, '_')
 
     filename = note_dir + "/" + name + "_" + date_time_string + ".md"
     call(['vim', filename])
 
-    with open(filename, 'a') as f:
-        f.write('\n')
+    with io.open(filename, 'a') as f:
+        f.write(newline)
 
         for tag in tags:
-            f.write(tag_marker + tag + '\n')
+            f.write(tag_marker + tag + newline)
 
 
 def search_view(args):
     # Get the files to compose the summary file from by searching.
     command = '%s -R -l %s %s' % (searcher, args.pattern, note_dir)
     try:
-        searcher_output = check_output(command.split())
+        b_searcher_output = check_output(command.split())
 
     except CalledProcessError as e:
         if e.returncode == 1:
-            print "No matching files found."
+            print("No matching files found.")
             return
         else:
             raise e
-    filenames = searcher_output.split('\n')[:-1]
+    searcher_output = b_searcher_output.decode('utf-8')
+
+    filenames = searcher_output.split(newline)[:-1]
     if not filenames:
-        print "No matching files found."
+        print("No matching files found.")
         return
 
     # View the chosen files
@@ -256,17 +272,19 @@ def date_view(args):
         '-newermt', args.frm, '-not', '-newermt', args.to]
 
     try:
-        find_output = check_output(command)
+        b_find_output = check_output(command)
 
     except CalledProcessError as e:
         if e.returncode == 1:
-            print "No matching files found."
+            print("No matching files found.")
             return
         else:
             raise e
-    filenames = find_output.split('\n')[:-1]
+    find_output = b_find_output.decode('utf-8')
+
+    filenames = find_output.split(newline)[:-1]
     if not filenames:
-        print "No matching files found."
+        print("No matching files found.")
         return
 
     # View the chosen files
@@ -280,18 +298,20 @@ def tail_view(args):
     command = 'ls -t1 %s' % note_dir
 
     try:
-        sorted_filenames = check_output(command.split())
+        b_sorted_filenames = check_output(command.split())
     except CalledProcessError as e:
         if e.returncode == 1:
-            print "No matching files found."
+            print("No matching files found.")
             return
         else:
             raise e
-    filenames = sorted_filenames.split('\n')[:-1]
+    sorted_filenames = b_sorted_filenames.decode('utf-8')
+
+    filenames = sorted_filenames.split(newline)[:-1]
     filenames = filenames[:args.n]
     filenames = [os.path.join(note_dir, fn) for fn in filenames]
     if not filenames:
-        print "No matching files found."
+        print("No matching files found.")
         return
 
     # View the chosen files
