@@ -21,7 +21,7 @@ config_parser = SafeConfigParser()
 config_parser.readfp(config_io)
 
 note_dir = config_parser.get('common', 'note_directory')
-search_results_dir = config_parser.get('common', 'search_directory')
+summary_dir = config_parser.get('common', 'summary_directory')
 delim = config_parser.get('common', 'delimiter')
 tag_marker = config_parser.get('common', 'tag_marker')
 
@@ -133,22 +133,22 @@ def view_notes(filenames, show_date, show_tags, viewer):
 
     filenames.sort(key=lambda f: mod_times[f])
 
-    if not os.path.isdir(search_results_dir):
-        os.mkdir(search_results_dir)
+    if not os.path.isdir(summary_dir):
+        os.mkdir(summary_dir)
     else:
-        search_filenames = [
-            os.path.join(search_results_dir, f)
-            for f in os.listdir(search_results_dir)]
+        summary_filenames = [
+            os.path.join(summary_dir, f)
+            for f in os.listdir(summary_dir)]
 
-        search_filenames = [
-            f for f in search_filenames if os.path.isfile(f)]
+        summary_filenames = [
+            f for f in summary_filenames if os.path.isfile(f)]
 
-        if len(search_filenames) > 20:
-            for sf in search_filenames:
+        if len(summary_filenames) > 20:
+            for sf in summary_filenames:
                 os.remove(sf)
 
     temp_file_args = {'mode': 'w',
-                      'dir': search_results_dir,
+                      'dir': summary_dir,
                       'suffix': ".md",
                       'delete': False}
 
@@ -327,9 +327,11 @@ def view_note_cl():
 
     search_parser = subparsers.add_parser(
         'search', help='View notes whose contents match the given pattern.')
+
     arg = search_parser.add_argument('pattern', type=str)
-    arg.completer = lambda prefix, **kwargs: get_all_tags(prefix)
     search_parser.set_defaults(func=search_view)
+
+    arg.completer = lambda prefix, **kwargs: get_all_tags(prefix)
 
     date_parser = subparsers.add_parser(
         'date', help='View notes whose most recent modification '
