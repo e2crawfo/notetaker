@@ -7,7 +7,6 @@ import datetime
 import string
 from tempfile import NamedTemporaryFile
 import argparse
-import argcomplete
 from subprocess import check_output, call, CalledProcessError
 import pkg_resources
 import io
@@ -350,7 +349,7 @@ def view_note_cl():
                     'for this argument is explicitly supplied, then the '
                     'top-level optional arguments must come before it. If '
                     'a value is not explicitly supplied, then top-level '
-                    'optional arguments cannot be supplied.\n\n'
+                    'optional arguments cannot be supplied.'
                     'Type \'viewnote <command> -h\' to see arguments specific '
                     'to that command.')
 
@@ -370,7 +369,6 @@ def view_note_cl():
     search_parser = subparsers.add_parser(
         'search', help='View notes whose contents match the given pattern.')
     arg = search_parser.add_argument('pattern', type=str)
-    # arg.completer = lambda prefix, **kwargs: get_all_tags(prefix)
     search_parser.set_defaults(func=search_view)
 
     date_parser = subparsers.add_parser(
@@ -390,8 +388,6 @@ def view_note_cl():
     tail_parser.add_argument('n', nargs='?', type=int, default=1)
     tail_parser.set_defaults(func=tail_view)
 
-    # argcomplete.autocomplete(parser)
-
     parser.set_default_subparser('search')
 
     args = parser.parse_args()
@@ -405,9 +401,6 @@ def make_note_cl():
         '--name', type=str, help="Name of the note.")
     parser.add_argument( '--verbose', '-v', action='count', help="Increase verbosity.")
     arg = parser.add_argument('tags', nargs='*', help="Tags for the note.")
-    # arg.completer = lambda prefix, **kwargs: get_all_tags(prefix)
-    # argcomplete.autocomplete(parser)
-
     args = parser.parse_args()
 
     tags = args.tags or []
