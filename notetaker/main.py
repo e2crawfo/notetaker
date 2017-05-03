@@ -225,7 +225,7 @@ def view_notes(paths, show_date, show_tags, viewer, verbose):
 
         with NamedTemporaryFile(mode='w',
                                 dir=str(summary_dir),
-                                prefix='summary_',
+                                prefix='notetaker_summary_',
                                 suffix='.md',
                                 delete=False) as summary_file:
             summary_file.write('\n'.join(to_write))
