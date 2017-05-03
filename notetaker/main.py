@@ -1,17 +1,20 @@
 from __future__ import print_function
 import os
 import sys
-import time
 import codecs
 import datetime
-import string
 from tempfile import NamedTemporaryFile
 import argparse
 from subprocess import check_output, call, CalledProcessError
 import pkg_resources
-import io
 from six.moves.configparser import SafeConfigParser
 from six import StringIO, u
+from pathlib import Path
+from contextlib import contextmanager
+import traceback
+import pdb
+from collections import namedtuple
+import difflib
 
 ENCODING = u('utf-8')
 NEWLINE = u('\n')
@@ -23,8 +26,9 @@ config_io = StringIO(config_string.decode(ENCODING))
 config_parser = SafeConfigParser()
 config_parser.readfp(config_io)
 
-note_dir = config_parser.get('common', 'note_directory')
-summary_dir = config_parser.get('common', 'summary_directory')
+note_dir = Path(config_parser.get('common', 'note_directory'))
+summary_dir = Path(config_parser.get('common', 'summary_directory'))
+merge_dir = Path(config_parser.get('common', 'merge_directory'))
 delim = config_parser.get('common', 'delimiter')
 tag_marker = config_parser.get('common', 'tag_marker')
 
@@ -45,9 +49,20 @@ else:
         return codecs.getwriter(ENCODING)(fp)
 
 
+@contextmanager
+def pdb_postmortem():
+    try:
+        yield
+    except:
+        type, value, tb = sys.exc_info()
+        traceback.print_exc()
+        pdb.post_mortem(tb)
+
+
 def set_default_subparser(self, name, args=None):
-    """
-    Default subparser selection. Call after setup, just before parse_args()
+    """ Default subparser selection.
+
+    Call after setup, just before parse_args()
     Taken from: http://stackoverflow.com/questions/6365601/default-
                 sub-command-or-handling-no-sub-command-with-argparse
 
@@ -86,8 +101,7 @@ argparse.ArgumentParser.set_default_subparser = set_default_subparser
 
 
 def get_all_tags(prefix=''):
-    """
-    Find all tags present in the notes folder.
+    """ Find all tags present in the notes folder.
 
     Parameters
     ----------
@@ -119,122 +133,172 @@ def get_all_tags(prefix=''):
     return tags
 
 
-def view_notes(filenames, show_date, show_tags, viewer, verbose):
+_Note = namedtuple('_Note', 'path text tags'.split())
 
-    if not os.path.isdir(note_dir):
-        os.mkdir(note_dir)
 
-    # Sort filenames by modification time
-    mod_times = {}
-    for filename in filenames:
-        mod_time = datetime.datetime.utcfromtimestamp(
-            os.path.getmtime(filename))
-        mod_times[filename] = mod_time
+class Note(_Note):
+    @classmethod
+    def from_path(cls, path):
+        with path.open('r') as f:
+            s = f.read()
+            return cls.from_string(path, s)
 
-    filenames.sort(key=lambda f: mod_times[f])
+    @classmethod
+    def from_string(cls, path, s):
+        text, _, tags = s.partition(tag_marker)
+        text = text.strip()
 
-    print("Viewing {n} files.".format(n=len(filenames)))
+        tags = tag_marker + tags
+        tags = tags.split(tag_marker)[1:]
+        tags = tuple(t.strip() for t in tags if t)
+
+        return Note(path, text, tags)
+
+    def as_string(self, show_tags=False):
+        s = [self.text.strip()] + ['']
+        if show_tags:
+            s.extend([tag_marker + tag for tag in self.tags] + [''])
+        return NEWLINE.join(s)
+
+    def save(self, mode='w'):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open(mode=mode) as f:
+            f.write(self.text)
+            f.write(NEWLINE)
+            for tag in self.tags:
+                f.write(tag_marker + tag + NEWLINE)
+
+
+def mtime(path):
+    return path.stat().st_mtime
+
+
+def atime(path):
+    return path.stat().st_atime
+
+
+def view_notes(paths, show_date, show_tags, viewer, verbose):
+    if not paths:
+        print("No matching notes found.")
+        return
+
+    if not note_dir.is_dir():
+        note_dir.mkdir(parents=True)
+
+    # Sort paths by modification time
+    paths = [note_dir / f for f in paths]
+    paths = sorted(paths, key=lambda n: mtime(n))
+
+    print("Viewing {n} files.".format(n=len(paths)))
 
     if verbose > 0:
-        for f in filenames:
-            print(f)
+        for p in paths:
+            print(p)
 
-    if not os.path.isdir(summary_dir):
-        os.mkdir(summary_dir)
+    if not summary_dir.is_dir():
+        summary_dir.mkdir(parents=True)
     else:
-        summary_filenames = [
-            os.path.join(summary_dir, f)
-            for f in os.listdir(summary_dir)]
-
-        summary_filenames = [
-            f for f in summary_filenames if os.path.isfile(f)]
-
-        if len(summary_filenames) > 20:
-            for sf in summary_filenames:
-                os.remove(sf)
-
-    temp_file_args = {'mode': 'w',
-                      'dir': summary_dir,
-                      'suffix': ".md",
-                      'delete': False}
+        existing_summary_files = [
+            summary for summary in summary_dir.iterdir() if summary.is_file()]
+        if len(existing_summary_files) > 20:
+            for summary in existing_summary_files:
+                summary.unlink()
 
     try:
-        stripped_contents = []
-        orig_contents = []
-
         # Populate the summary file
-        with uwriter(NamedTemporaryFile(**temp_file_args)) as outfile:
-            date = datetime.date.fromtimestamp(0.0)
+        date = datetime.date.fromtimestamp(0.0)
+        to_write = []
+        notes = []
+        for p in paths:
+            note = Note.from_path(p)
+            notes.append(note)
 
-            for filename in filenames:
-                with io.open(filename, 'r') as f:
-                    if show_date:
-                        mod_time = mod_times[filename]
-                        new_date = mod_time.date()
+            if show_date:
+                new_date = datetime.datetime.utcfromtimestamp(mtime(note.path)).date()
+                if new_date != date:
+                    date_str = new_date.strftime("%Y-%m-%d")
+                    to_write.append("{}{}".format(DATE_PREFIX, date_str))
+                    date = new_date
 
-                        if new_date != date:
-                            time_str = new_date.strftime("%Y-%m-%d")
-                            outfile.write(DATE_PREFIX + str(time_str) + NEWLINE)
+            to_write.append(delim)
+            to_write.append(note.as_string(show_tags))
 
-                            date = new_date
+        with NamedTemporaryFile(mode='w',
+                                dir=str(summary_dir),
+                                prefix='summary_',
+                                suffix='.md',
+                                delete=False) as summary_file:
+            summary_file.write('\n'.join(to_write))
 
-                    outfile.write(delim)
-                    outfile.write(NEWLINE)
+        summary_path = Path(summary_file.name)
 
-                    contents = f.read()
-
-                    if not show_tags:
-                        contents = contents.partition(tag_marker)
-                        stripped_contents.append(contents[1] + contents[2])
-                        contents = contents[0]
-                    else:
-                        stripped_contents.append("")
-
-                    contents = contents.strip()
-                    orig_contents.append(contents)
-                    outfile.write(contents)
-
-                    outfile.write(NEWLINE + NEWLINE)
-
-        outfile_mod_time = time.gmtime(os.path.getmtime(outfile.name))
-        call([viewer, outfile.name])
-        new_outfile_mod_time = time.gmtime(os.path.getmtime(outfile.name))
+        summary_mod_time = mtime(summary_path)
+        call([viewer, summary_file.name])
+        new_summary_mod_time = mtime(summary_path)
 
         n_writes = 0
 
         # Write edits
-        if new_outfile_mod_time > outfile_mod_time:
-            with io.open(outfile.name, 'r') as results:
-                text = results.read()
+        if new_summary_mod_time > summary_mod_time:
+            new_summary = Path(summary_file.name).read_text()
 
-                new_contents = [o.split(NEWLINE) for o in text.split(delim)[1:]]
-                new_contents = [
-                    [n for n in nc if not n.startswith(DATE_PREFIX)]
-                    for nc in new_contents]
-                new_contents = [NEWLINE.join(nc).strip() for nc in new_contents]
+            # Remove comments.
+            new_summary = new_summary.split(NEWLINE)
+            new_summary = [l for l in new_summary if not l.startswith(DATE_PREFIX)]
+            new_summary = NEWLINE.join(new_summary)
 
-                lists = zip(
-                    orig_contents, new_contents, filenames, stripped_contents)
-                for orig, new, filename, stripped in lists:
-                    if new != orig:
-                        if verbose > 0:
-                            print("Writing to " + filename + ".")
+            segments = new_summary.split(delim)[1:]
 
-                        atime = os.path.getatime(filename)
-                        mtime = os.path.getmtime(filename)
+            for note, seg in zip(notes, segments):
+                seg = seg.strip()
 
-                        with io.open(filename, 'w') as f:
-                            f.write(new)
-                            f.write(stripped)
+                if show_tags:
+                    new = Note.from_string(note.path, seg)
+                else:
+                    new = Note(note.path, seg, note.tags)
 
-                        os.utime(filename, (atime, mtime))
-                        n_writes += 1
+                if new != note:
+                    # User wrote to the part of the summary file corresponding to ``note``
+                    if verbose > 0:
+                        print("Writing to {}.".format(note))
+
+                    note_on_disk = Note.from_path(note.path)
+                    if note_on_disk != note:
+                        print("Note {} has changed since the summary file was "
+                              "created, editing a diff...".format(note.path))
+
+                        on_disk_text = note_on_disk.text.splitlines(keepends=True)
+                        new_text = new.text.splitlines(keepends=True)
+                        diff = difflib.ndiff(on_disk_text, new_text)
+                        _new_text = ''.join(diff)
+                        new_text = []
+                        for line in _new_text.split('\n'):
+                            if line.startswith('  '):
+                                line = line[2:]
+                            elif any(line.startswith(c) for c in ('? ', '- ', '+ ')):
+                                pass
+                            else:
+                                raise NotImplementedError()
+                            new_text.append(line)
+                        new_text = '\n'.join(new_text)
+                        new_tags = sorted(set(note_on_disk.tags) | set(new.tags))
+                        new = Note(merge_dir / note.path.name, new_text, new_tags)
+                        new.save()
+                        call([viewer, str(new.path)])
+                        post_edit = Note.from_path(new.path)
+                        new = Note(note.path, post_edit.text, post_edit.tags)
+
+                    _atime, _mtime = atime(note.path), mtime(note.path)
+
+                    new.save()
+                    os.utime(str(new.path), (_atime, _mtime))
+                    n_writes += 1
 
         print("Wrote to {n} files.".format(n=n_writes))
 
     finally:
         try:
-            os.remove(outfile.name)
+            os.remove(summary.name)
         except:
             pass
 
@@ -244,25 +308,25 @@ def make_note(name, tags, verbose):
     for c in [":", ".", " ", "-"]:
         date_time_string = date_time_string.replace(c, '_')
 
-    if name is None:
-        name = '_'.join(tags)
+    name = name or '_'.join(tags)
+    note_path = note_dir / "{}_{}.md".format(name, date_time_string)
 
-    filename = note_dir + "/" + name + "_" + date_time_string + ".md"
-    call(['vim', filename])
+    call(['vim', str(note_path)])
 
-    with io.open(filename, 'a') as f:
-        f.write(NEWLINE)
-
-        for tag in tags:
-            f.write(tag_marker + tag + NEWLINE)
-
-    if verbose > 0:
-        print("Saved as {filename}".format(filename=filename))
+    try:
+        note = Note.from_path(note_path)
+        with_tags = Note(note.path, note.text, tags)
+        with_tags.save()
+        print("Saved as {}".format(note_path))
+    except:
+        print("Note was empty, so not saved.")
 
 
 def search_view(args):
-    # Get the files to compose the summary file from by searching.
-    command = '%s -R -l %s %s' % (searcher, args.pattern, note_dir)
+    """ Get the files to compose the summary file from by searching. """
+
+    command = '{} -R -l {} {}'.format(searcher, args.pattern, note_dir)
+
     try:
         b_searcher_output = check_output(command.split())
 
@@ -273,11 +337,7 @@ def search_view(args):
         else:
             raise e
     searcher_output = b_searcher_output.decode(ENCODING)
-
     filenames = searcher_output.split(NEWLINE)[:-1]
-    if not filenames:
-        print("No matching files found.")
-        return
 
     # View the chosen files
     view_notes(
@@ -287,13 +347,12 @@ def search_view(args):
 
 
 def date_view(args):
-    # Get the files to compose the summary file from using a date range.
-    command = [
-        'find', note_dir, '-type', 'f',
-        '-newermt', args.frm, '-not', '-newermt', args.to]
+    """ Get the files to compose the summary file from using a date range. """
+
+    command = 'find {} -type f -newermt {} -not -newermt {}'.format(note_dir, args.frm, args.to)
 
     try:
-        b_find_output = check_output(command)
+        b_find_output = check_output(command.split())
 
     except CalledProcessError as e:
         if e.returncode == 1:
@@ -302,11 +361,7 @@ def date_view(args):
         else:
             raise e
     find_output = b_find_output.decode(ENCODING)
-
     filenames = find_output.split(NEWLINE)[:-1]
-    if not filenames:
-        print("No matching files found.")
-        return
 
     # View the chosen files
     view_notes(
@@ -316,8 +371,9 @@ def date_view(args):
 
 
 def tail_view(args):
-    # Get the files to compose the summary file from
-    command = 'ls -t1 %s' % note_dir
+    """ Get the files to compose the summary file from. """
+
+    command = 'ls -t1 {}'.format(note_dir)
 
     try:
         b_sorted_filenames = check_output(command.split())
@@ -331,10 +387,6 @@ def tail_view(args):
 
     filenames = sorted_filenames.split(NEWLINE)[:-1]
     filenames = filenames[:args.n]
-    filenames = [os.path.join(note_dir, fn) for fn in filenames]
-    if not filenames:
-        print("No matching files found.")
-        return
 
     # View the chosen files
     view_notes(
@@ -355,6 +407,8 @@ def view_note_cl():
                     'to that command.')
 
     parser.add_argument(
+        '--pdb', action='store_true', help="If supplied, enter post-mortem debugging on error.")
+    parser.add_argument(
         '--show-tags', action='store_true', help="Supply to show tags.")
     parser.add_argument(
         '--viewer', default='vim',
@@ -369,7 +423,7 @@ def view_note_cl():
 
     search_parser = subparsers.add_parser(
         'search', help='View notes whose contents match the given pattern.')
-    arg = search_parser.add_argument('pattern', type=str)
+    search_parser.add_argument('pattern', type=str)
     search_parser.set_defaults(func=search_view)
 
     date_parser = subparsers.add_parser(
@@ -392,7 +446,12 @@ def view_note_cl():
     parser.set_default_subparser('search')
 
     args = parser.parse_args()
-    args.func(args)
+
+    if args.pdb:
+        with pdb_postmortem():
+            args.func(args)
+    else:
+        args.func(args)
 
 
 def make_note_cl():
@@ -401,15 +460,22 @@ def make_note_cl():
     parser.add_argument(
         '--name', type=str, help="Name of the note.")
     parser.add_argument(
+        '--pdb', action='store_true', help="If supplied, enter post-mortem debugging on error.")
+    parser.add_argument(
         '-v', '--verbose', action='count', default=0, help="Increase verbosity.")
-    arg = parser.add_argument('tags', nargs='*', help="Tags for the note.")
+    parser.add_argument('tags', nargs='*', help="Tags for the note.")
     args = parser.parse_args()
 
     tags = args.tags or []
-    make_note(args.name, tags, args.verbose)
+
+    if args.pdb:
+        with pdb_postmortem():
+            make_note(args.name, tags, args.verbose)
+    else:
+        make_note(args.name, tags, args.verbose)
+
 
 if __name__ == "__main__":
-
     # Calling these makes argcomplete work.
     make_note_cl()
     view_note_cl()
