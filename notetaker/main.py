@@ -276,7 +276,7 @@ def view_notes(paths, show_date, show_tags, viewer, verbose):
                             if line.startswith('  '):
                                 line = line[2:]
                             elif any(line.startswith(c) for c in ('? ', '- ', '+ ')):
-                                pass
+                                line = '&&& ' + line
                             else:
                                 raise NotImplementedError()
                             new_text.append(line)
