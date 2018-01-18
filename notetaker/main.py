@@ -326,10 +326,10 @@ def make_note(name, tags):
 def search_view(args):
     """ Get the files to compose the summary file from by searching. """
 
-    command = '{} -R -l {} {}'.format(searcher, args.pattern, note_dir)
+    command = [str(s) for s in [searcher, "-R", "-l", args.pattern, note_dir]]
 
     try:
-        b_searcher_output = check_output(command.split())
+        b_searcher_output = check_output(command)
 
     except CalledProcessError as e:
         if e.returncode == 1:
