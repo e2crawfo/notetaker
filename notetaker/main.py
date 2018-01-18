@@ -177,7 +177,7 @@ def atime(path):
     return path.stat().st_atime
 
 
-def view_notes(paths, show_date, show_tags, viewer, verbose):
+def view_notes(paths, show_date, show_tags, viewer):
     if not paths:
         print("No matching notes found.")
         return
@@ -190,10 +190,12 @@ def view_notes(paths, show_date, show_tags, viewer, verbose):
     paths = sorted(paths, key=lambda n: mtime(n))
 
     print("Viewing {n} files.".format(n=len(paths)))
-
-    if verbose > 0:
-        for p in paths:
-            print(p)
+    max_paths = 10
+    for p in paths[:max_paths]:
+        print(p)
+    if len(paths) > max_paths:
+        print("...and {} more.".format(len(paths) - max_paths))
+    print("")
 
     if not summary_dir.is_dir():
         summary_dir.mkdir(parents=True)
@@ -259,8 +261,7 @@ def view_notes(paths, show_date, show_tags, viewer, verbose):
 
                 if new != note:
                     # User wrote to the part of the summary file corresponding to ``note``
-                    if verbose > 0:
-                        print("Writing to {}.".format(note))
+                    print("Writing to {}.".format(note.path))
 
                     note_on_disk = Note.from_path(note.path)
                     if note_on_disk != note:
@@ -303,7 +304,7 @@ def view_notes(paths, show_date, show_tags, viewer, verbose):
             pass
 
 
-def make_note(name, tags, verbose):
+def make_note(name, tags):
     date_time_string = str(datetime.datetime.now()).split('.')[0]
     for c in [":", ".", " ", "-"]:
         date_time_string = date_time_string.replace(c, '_')
@@ -342,8 +343,7 @@ def search_view(args):
     # View the chosen files
     view_notes(
         filenames, show_date=not args.no_date,
-        show_tags=args.show_tags, viewer=args.viewer,
-        verbose=args.verbose)
+        show_tags=args.show_tags, viewer=args.viewer)
 
 
 def date_view(args):
@@ -366,8 +366,7 @@ def date_view(args):
     # View the chosen files
     view_notes(
         filenames, show_date=not args.no_date,
-        show_tags=args.show_tags, viewer=args.viewer,
-        verbose=args.verbose)
+        show_tags=args.show_tags, viewer=args.viewer)
 
 
 def tail_view(args):
@@ -385,14 +384,15 @@ def tail_view(args):
             raise e
     sorted_filenames = b_sorted_filenames.decode(ENCODING)
 
+    start = 0 if args.n <= 0 else args.final - args.n
+
     filenames = sorted_filenames.split(NEWLINE)[:-1]
-    filenames = filenames[:args.n]
+    filenames = filenames[start:args.final]
 
     # View the chosen files
     view_notes(
         filenames, show_date=not args.no_date,
-        show_tags=args.show_tags, viewer=args.viewer,
-        verbose=args.verbose)
+        show_tags=args.show_tags, viewer=args.viewer)
 
 
 def view_note_cl():
@@ -416,8 +416,6 @@ def view_note_cl():
     parser.add_argument(
         '--no-date', default=False, action='store_true',
         help="Supply to hide dates.")
-    parser.add_argument(
-        '-v', '--verbose', action='count', default=0, help="Increase verbosity.")
 
     subparsers = parser.add_subparsers()
 
@@ -440,7 +438,12 @@ def view_note_cl():
 
     tail_parser = subparsers.add_parser(
         'tail', help='View most recent ``n`` notes.')
-    tail_parser.add_argument('n', nargs='?', type=int, default=1)
+    tail_parser.add_argument('final', nargs='?', type=int, default=1,
+                             help="Index of final note to display, counting backwards.")
+    tail_parser.add_argument('n', nargs='?', type=int, default=0,
+                             help="Number of notes to display, counting forward from final note. "
+                                  "If value of 0 is supplied, or argument is not supplied, all notes "
+                                  "up to the final note will be displayed.")
     tail_parser.set_defaults(func=tail_view)
 
     parser.set_default_subparser('search')
@@ -461,8 +464,6 @@ def make_note_cl():
         '--name', type=str, help="Name of the note.")
     parser.add_argument(
         '--pdb', action='store_true', help="If supplied, enter post-mortem debugging on error.")
-    parser.add_argument(
-        '-v', '--verbose', action='count', default=0, help="Increase verbosity.")
     parser.add_argument('tags', nargs='*', help="Tags for the note.")
     args = parser.parse_args()
 
@@ -470,9 +471,9 @@ def make_note_cl():
 
     if args.pdb:
         with pdb_postmortem():
-            make_note(args.name, tags, args.verbose)
+            make_note(args.name, tags)
     else:
-        make_note(args.name, tags, args.verbose)
+        make_note(args.name, tags)
 
 
 if __name__ == "__main__":
