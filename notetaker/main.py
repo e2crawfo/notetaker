@@ -5,7 +5,7 @@ import codecs
 import datetime
 from tempfile import NamedTemporaryFile
 import argparse
-from subprocess import check_output, call, CalledProcessError
+from subprocess import check_output, call, Popen, TimeoutExpired, CalledProcessError
 import pkg_resources
 from six.moves.configparser import SafeConfigParser
 from six import StringIO, u
@@ -20,6 +20,7 @@ ENCODING = u('utf-8')
 NEWLINE = u('\n')
 DATE_PREFIX = u("## Journal: ")
 
+
 config_string = pkg_resources.resource_string(__name__, 'config.ini')
 config_io = StringIO(config_string.decode(ENCODING))
 
@@ -31,14 +32,26 @@ summary_dir = Path(config_parser.get('common', 'summary_directory'))
 merge_dir = Path(config_parser.get('common', 'merge_directory'))
 delim = config_parser.get('common', 'delimiter')
 tag_marker = config_parser.get('common', 'tag_marker')
+propagate_changes_interval = config_parser.getint('common', 'propagate_changes_interval')
 
 # searcher can be any of: grep, ag, ack-grep
 searcher = config_parser.get('common', 'searcher')
 
-searcher_args = {'grep': [],
-                 'ack-grep': ['--nobreak']}
-searcher_args['ack'] = searcher_args['ack-grep']
-searcher_args['ag'] = searcher_args['ack-grep']
+_searcher_args = {'grep': [], 'ack-grep': ['--nobreak']}
+_searcher_args['ack'] = _searcher_args['ack-grep']
+_searcher_args['ag'] = _searcher_args['ack-grep']
+searcher_args = _searcher_args[searcher]
+
+cfg = dict(
+    note_dir=note_dir,
+    summary_dir=summary_dir,
+    merge_dir=merge_dir,
+    delim=delim,
+    tag_marker=tag_marker,
+    propagate_changes_interval=propagate_changes_interval,
+    searcher=searcher,
+    searcher_args=searcher_args
+)
 
 
 if sys.version_info[0] > 2:
@@ -53,7 +66,7 @@ else:
 def pdb_postmortem():
     try:
         yield
-    except:
+    except Exception:
         type, value, tb = sys.exc_info()
         traceback.print_exc()
         pdb.post_mortem(tb)
@@ -109,11 +122,11 @@ def get_all_tags(prefix=''):
         Only tags that begin with prefix will be returned.
 
     """
-    query = tag_marker
+    query = cfg['tag_marker']
 
-    searcher_line = [searcher]
-    searcher_line.extend(searcher_args[searcher])
-    searcher_line.extend(["-r", query, note_dir])
+    searcher_line = [cfg['searcher']]
+    searcher_line.extend(cfg['searcher_args'])
+    searcher_line.extend(["-r", query, cfg['note_dir']])
 
     try:
         b_searcher_output = check_output(searcher_line)
@@ -127,7 +140,7 @@ def get_all_tags(prefix=''):
     searcher_output = b_searcher_output.encode(ENCODING)
 
     tags = searcher_output.split(NEWLINE)[:-2]
-    tags = [line.split(tag_marker)[-1].strip() for line in tags]
+    tags = [line.split(cfg['tag_marker'])[-1].strip() for line in tags]
     tags = [t for t in tags if t.startswith(prefix)]
 
     return tags
@@ -177,7 +190,82 @@ def atime(path):
     return path.stat().st_atime
 
 
-def view_notes(paths, show_date, show_tags, viewer):
+def propagate_changes(finished, notes, summary_file):
+    new_summary = Path(summary_file.name).read_text()
+
+    # Remove comments.
+    new_summary = new_summary.split(NEWLINE)
+    new_summary = [l for l in new_summary if not l.startswith(DATE_PREFIX)]
+    new_summary = NEWLINE.join(new_summary)
+
+    segments = new_summary.split(delim)[1:]
+
+    n_writes = 0
+    updated_notes = []
+
+    for note, seg in zip(notes, segments):
+        seg = seg.strip()
+
+        if cfg['show_tags']:
+            new_note = Note.from_string(note.path, seg)
+        else:
+            new_note = Note(note.path, seg, note.tags)
+
+        note_changed = False
+
+        if new_note != note:
+            # User wrote to the part of the summary file corresponding to ``note``
+
+            note_on_disk = Note.from_path(note.path)
+            if note_on_disk != note:
+                # There is a discrepancy between the current note on disk and the note
+                # we were editing. If editing has finished, open up a diff-editing session
+                # to take care of conflicts between newly edited note and the inconsistent copy
+                # currently on disk. If editing has not finished, do nothing.
+
+                if finished:
+                    on_disk_text = note_on_disk.text.splitlines(keepends=True)
+                    new_text = new_note.text.splitlines(keepends=True)
+                    diff = difflib.ndiff(on_disk_text, new_text)
+                    _new_text = ''.join(diff)
+                    new_text = []
+                    for line in _new_text.split('\n'):
+                        if line.startswith('  '):
+                            line = line[2:]
+                        elif any(line.startswith(c) for c in ('? ', '- ', '+ ')):
+                            line = '&&& ' + line
+                        else:
+                            raise Exception('NotImplemented')
+                        new_text.append(line)
+                    new_text = '\n'.join(new_text)
+                    new_tags = sorted(set(note_on_disk.tags) | set(new_note.tags))
+                    new_note = Note(merge_dir / note.path.name, new_text, new_tags)
+                    new_note.save()
+                    command = [cfg['viewer'], str(new_note.path)]
+                    call(command)
+                    post_edit = Note.from_path(new_note.path)
+                    new_note = Note(note.path, post_edit.text, post_edit.tags)
+
+                    _atime, _mtime = atime(note.path), mtime(note.path)
+                    new_note.save()
+                    os.utime(str(new_note.path), (_atime, _mtime))
+                    note_changed = True
+            else:
+                _atime, _mtime = atime(note.path), mtime(note.path)
+                new_note.save()
+                os.utime(str(new_note.path), (_atime, _mtime))
+                note_changed = True
+
+        if note_changed:
+            updated_notes.append(new_note)
+            n_writes += 1
+        else:
+            updated_notes.append(note)
+
+    return updated_notes
+
+
+def view_notes(paths):
     if not paths:
         print("No matching notes found.")
         return
@@ -210,12 +298,12 @@ def view_notes(paths, show_date, show_tags, viewer):
         # Populate the summary file
         date = datetime.date.fromtimestamp(0.0)
         to_write = []
-        notes = []
+        original_notes = []
         for p in paths:
             note = Note.from_path(p)
-            notes.append(note)
+            original_notes.append(note)
 
-            if show_date:
+            if cfg['show_date']:
                 new_date = datetime.datetime.utcfromtimestamp(mtime(note.path)).date()
                 if new_date != date:
                     date_str = new_date.strftime("%Y-%m-%d")
@@ -223,7 +311,9 @@ def view_notes(paths, show_date, show_tags, viewer):
                     date = new_date
 
             to_write.append(delim)
-            to_write.append(note.as_string(show_tags))
+            to_write.append(note.as_string(cfg['show_tags']))
+
+        notes = original_notes + []
 
         with NamedTemporaryFile(mode='w',
                                 dir=str(summary_dir),
@@ -235,72 +325,37 @@ def view_notes(paths, show_date, show_tags, viewer):
         summary_path = Path(summary_file.name)
 
         summary_mod_time = mtime(summary_path)
-        call([viewer, summary_file.name])
-        new_summary_mod_time = mtime(summary_path)
 
-        n_writes = 0
+        command = [cfg['viewer'], summary_file.name]
+        editing_process = Popen(command)
 
-        # Write edits
-        if new_summary_mod_time > summary_mod_time:
-            new_summary = Path(summary_file.name).read_text()
+        while True:
+            finished = True
+            try:
+                editing_process.wait(propagate_changes_interval)
+            except TimeoutExpired:
+                finished = False
 
-            # Remove comments.
-            new_summary = new_summary.split(NEWLINE)
-            new_summary = [l for l in new_summary if not l.startswith(DATE_PREFIX)]
-            new_summary = NEWLINE.join(new_summary)
+            new_summary_mod_time = mtime(summary_path)
 
-            segments = new_summary.split(delim)[1:]
+            if new_summary_mod_time > summary_mod_time:
+                summary_mod_time = new_summary_mod_time
+                notes = propagate_changes(finished, notes, summary_file)
 
-            for note, seg in zip(notes, segments):
-                seg = seg.strip()
+            if finished:
+                break
 
-                if show_tags:
-                    new = Note.from_string(note.path, seg)
-                else:
-                    new = Note(note.path, seg, note.tags)
-
-                if new != note:
-                    # User wrote to the part of the summary file corresponding to ``note``
-                    print("Writing to {}.".format(note.path))
-
-                    note_on_disk = Note.from_path(note.path)
-                    if note_on_disk != note:
-                        print("Note {} has changed since the summary file was "
-                              "created, editing a diff...".format(note.path))
-
-                        on_disk_text = note_on_disk.text.splitlines(keepends=True)
-                        new_text = new.text.splitlines(keepends=True)
-                        diff = difflib.ndiff(on_disk_text, new_text)
-                        _new_text = ''.join(diff)
-                        new_text = []
-                        for line in _new_text.split('\n'):
-                            if line.startswith('  '):
-                                line = line[2:]
-                            elif any(line.startswith(c) for c in ('? ', '- ', '+ ')):
-                                line = '&&& ' + line
-                            else:
-                                raise NotImplementedError()
-                            new_text.append(line)
-                        new_text = '\n'.join(new_text)
-                        new_tags = sorted(set(note_on_disk.tags) | set(new.tags))
-                        new = Note(merge_dir / note.path.name, new_text, new_tags)
-                        new.save()
-                        call([viewer, str(new.path)])
-                        post_edit = Note.from_path(new.path)
-                        new = Note(note.path, post_edit.text, post_edit.tags)
-
-                    _atime, _mtime = atime(note.path), mtime(note.path)
-
-                    new.save()
-                    os.utime(str(new.path), (_atime, _mtime))
-                    n_writes += 1
-
-        print("Wrote to {n} files.".format(n=n_writes))
+        n_changes = 0
+        for note, original_note in zip(notes, original_notes):
+            if note != original_note:
+                print("Changed note {}.".format(note.path))
+                n_changes += 1
+        print("Changed {n} notes.".format(n=n_changes))
 
     finally:
         try:
-            os.remove(summary.name)
-        except:
+            os.remove(summary_file.name)
+        except FileNotFoundError:
             pass
 
 
@@ -319,8 +374,8 @@ def make_note(name, tags):
         with_tags = Note(note.path, note.text, tags)
         with_tags.save()
         print("Saved as {}".format(note_path))
-    except:
-        print("Note was empty, so not saved.")
+    except FileNotFoundError:
+        print("Note was not written to, so not saved.")
 
 
 def search_view(args):
@@ -340,10 +395,13 @@ def search_view(args):
     searcher_output = b_searcher_output.decode(ENCODING)
     filenames = searcher_output.split(NEWLINE)[:-1]
 
-    # View the chosen files
-    view_notes(
-        filenames, show_date=not args.no_date,
-        show_tags=args.show_tags, viewer=args.viewer)
+    cfg.update(
+        show_date=not args.no_date,
+        show_tags=args.show_tags,
+        viewer=args.viewer,
+    )
+
+    view_notes(filenames)
 
 
 def date_view(args):
@@ -363,10 +421,13 @@ def date_view(args):
     find_output = b_find_output.decode(ENCODING)
     filenames = find_output.split(NEWLINE)[:-1]
 
-    # View the chosen files
-    view_notes(
-        filenames, show_date=not args.no_date,
-        show_tags=args.show_tags, viewer=args.viewer)
+    cfg.update(
+        show_date=not args.no_date,
+        show_tags=args.show_tags,
+        viewer=args.viewer,
+    )
+
+    view_notes(filenames)
 
 
 def tail_view(args):
@@ -389,10 +450,13 @@ def tail_view(args):
     filenames = sorted_filenames.split(NEWLINE)[:-1]
     filenames = filenames[start:args.final]
 
-    # View the chosen files
-    view_notes(
-        filenames, show_date=not args.no_date,
-        show_tags=args.show_tags, viewer=args.viewer)
+    cfg.update(
+        show_date=not args.no_date,
+        show_tags=args.show_tags,
+        viewer=args.viewer,
+    )
+
+    view_notes(filenames)
 
 
 def view_note_cl():
