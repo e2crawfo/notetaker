@@ -13,7 +13,7 @@ from pathlib import Path
 from contextlib import contextmanager
 import traceback
 import pdb
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 import difflib
 
 ENCODING = u('utf-8')
@@ -190,7 +190,7 @@ def atime(path):
     return path.stat().st_atime
 
 
-def propagate_changes(finished, notes, summary_file):
+def extract_notes_from_summary(notes, summary_file):
     new_summary = Path(summary_file.name).read_text()
 
     # Remove comments.
@@ -200,69 +200,98 @@ def propagate_changes(finished, notes, summary_file):
 
     segments = new_summary.split(delim)[1:]
 
-    n_writes = 0
-    updated_notes = []
+    if len(segments) > len(notes):
+        raise Exception("Notes were added in the process of editing the summary file.")
+    if len(segments) < len(notes):
+        raise Exception("Notes were removed in the process of editing the summary file.")
 
-    for note, seg in zip(notes, segments):
+    extracted_notes = type(notes)()
+
+    for (path, note), seg in zip(notes.items(), segments):
         seg = seg.strip()
-
         if cfg['show_tags']:
-            new_note = Note.from_string(note.path, seg)
+            _note = Note.from_string(path, seg)
         else:
-            new_note = Note(note.path, seg, note.tags)
+            _note = Note(path, seg, note.tags)
+        extracted_notes[path] = _note
 
-        note_changed = False
+    return extracted_notes
 
-        if new_note != note:
+
+def propagate_changes(notes, summary_file):
+    extracted_notes = extract_notes_from_summary(notes, summary_file)
+
+    for path in notes:
+        note = notes[path]
+        extracted_note = extracted_notes[path]
+
+        if extracted_note != note:
             # User wrote to the part of the summary file corresponding to ``note``
 
-            note_on_disk = Note.from_path(note.path)
-            if note_on_disk != note:
-                # There is a discrepancy between the current note on disk and the note
-                # we were editing. If editing has finished, open up a diff-editing session
-                # to take care of conflicts between newly edited note and the inconsistent copy
-                # currently on disk. If editing has not finished, do nothing.
+            note_on_disk = Note.from_path(path)
+            if note_on_disk == note:
+                # Do not write the edited note to disk if there is a discrepancy between
+                # the current note on disk and the note before editing began, as this indicates
+                # that the note has been changed by some other means. Once editing is over,
+                # edits applied to such a note will be resolved by a merge process.
 
-                if finished:
-                    on_disk_text = note_on_disk.text.splitlines(keepends=True)
-                    new_text = new_note.text.splitlines(keepends=True)
-                    diff = difflib.ndiff(on_disk_text, new_text)
-                    _new_text = ''.join(diff)
-                    new_text = []
-                    for line in _new_text.split('\n'):
-                        if line.startswith('  '):
-                            line = line[2:]
-                        elif any(line.startswith(c) for c in ('? ', '- ', '+ ')):
-                            line = '&&& ' + line
-                        else:
-                            raise Exception('NotImplemented')
-                        new_text.append(line)
-                    new_text = '\n'.join(new_text)
-                    new_tags = sorted(set(note_on_disk.tags) | set(new_note.tags))
-                    new_note = Note(merge_dir / note.path.name, new_text, new_tags)
-                    new_note.save()
-                    command = [cfg['viewer'], str(new_note.path)]
-                    call(command)
-                    post_edit = Note.from_path(new_note.path)
-                    new_note = Note(note.path, post_edit.text, post_edit.tags)
+                _atime, _mtime = atime(path), mtime(path)
+                extracted_note.save()
+                os.utime(str(path), (_atime, _mtime))
 
-                    _atime, _mtime = atime(note.path), mtime(note.path)
-                    new_note.save()
-                    os.utime(str(new_note.path), (_atime, _mtime))
-                    note_changed = True
+                notes[path] = extracted_note
+
+
+def perform_diffs(notes, summary_file):
+    extracted_notes = extract_notes_from_summary(notes, summary_file)
+
+    for path in notes:
+        note = notes[path]
+        extracted_note = extracted_notes[path]
+
+        no_change = note == extracted_note
+
+        if no_change:
+            continue
+
+        on_disk_note = Note.from_path(path)
+        no_interference = on_disk_note == note
+
+        if no_interference:
+            continue
+
+        # A merge is necessary
+
+        on_disk_text = on_disk_note.text.splitlines(keepends=True)
+        extracted_text = extracted_note.text.splitlines(keepends=True)
+
+        _diff_text = ''.join(difflib.ndiff(on_disk_text, extracted_text))
+        diff_text = []
+        for line in _diff_text.split('\n'):
+            if line.startswith('  '):
+                line = line[2:]
+            elif any(line.startswith(c) for c in ('? ', '- ', '+ ')):
+                line = '&&& ' + line
+            elif not line:
+                pass
             else:
-                _atime, _mtime = atime(note.path), mtime(note.path)
-                new_note.save()
-                os.utime(str(new_note.path), (_atime, _mtime))
-                note_changed = True
+                raise Exception('NotImplemented')
+            diff_text.append(line)
+        diff_text = '\n'.join(diff_text)
 
-        if note_changed:
-            updated_notes.append(new_note)
-            n_writes += 1
-        else:
-            updated_notes.append(note)
+        new_tags = sorted(set(on_disk_note.tags) | set(extracted_note.tags))
+        extracted_note = Note(merge_dir / path.name, diff_text, new_tags)
+        extracted_note.save()
+        command = [cfg['viewer'], str(extracted_note.path)]
+        call(command)
+        edited_note = Note.from_path(extracted_note.path)
+        edited_note = Note(path, edited_note.text, edited_note.tags)
 
-    return updated_notes
+        _atime, _mtime = atime(path), mtime(path)
+        edited_note.save()
+        os.utime(str(path), (_atime, _mtime))
+
+        notes[path] = edited_note
 
 
 def view_notes(paths):
@@ -298,22 +327,24 @@ def view_notes(paths):
         # Populate the summary file
         date = datetime.date.fromtimestamp(0.0)
         to_write = []
-        original_notes = []
-        for p in paths:
-            note = Note.from_path(p)
-            original_notes.append(note)
+        original_notes = OrderedDict()
+        for path in paths:
+            note = Note.from_path(path)
+            original_notes[path] = note
 
             if cfg['show_date']:
-                new_date = datetime.datetime.utcfromtimestamp(mtime(note.path)).date()
+                new_date = datetime.datetime.utcfromtimestamp(mtime(path)).date()
                 if new_date != date:
                     date_str = new_date.strftime("%Y-%m-%d")
-                    to_write.append("{}{}".format(DATE_PREFIX, date_str))
+                    to_write.append("{}{}(UTC)".format(DATE_PREFIX, date_str))
                     date = new_date
 
             to_write.append(delim)
             to_write.append(note.as_string(cfg['show_tags']))
 
-        notes = original_notes + []
+        # Latest version of the notes for which there is (after this function call)
+        # agreement between the sumamry file and the on-disk notes.
+        notes = original_notes.copy()
 
         with NamedTemporaryFile(mode='w',
                                 dir=str(summary_dir),
@@ -340,17 +371,19 @@ def view_notes(paths):
 
             if new_summary_mod_time > summary_mod_time:
                 summary_mod_time = new_summary_mod_time
-                notes = propagate_changes(finished, notes, summary_file)
+                propagate_changes(notes, summary_file)
 
             if finished:
                 break
 
+        perform_diffs(notes, summary_file)
+
         n_changes = 0
-        for note, original_note in zip(notes, original_notes):
-            if note != original_note:
-                print("Changed note {}.".format(note.path))
+        for path in notes:
+            if notes[path] != original_notes[path]:
+                print("Changed note {}.".format(path))
                 n_changes += 1
-        print("Changed {n} notes.".format(n=n_changes))
+        print("Changed {n} note(s).".format(n=n_changes))
 
     finally:
         try:
