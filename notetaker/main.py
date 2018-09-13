@@ -18,7 +18,8 @@ import difflib
 
 ENCODING = u('utf-8')
 NEWLINE = u('\n')
-DATE_PREFIX = u("## Journal: ")
+DATE_PREFIX = u("# Journal --- ")
+NOTE_HEADER = u("# Note ---")
 
 
 config_string = pkg_resources.resource_string(__name__, 'config.ini')
@@ -30,7 +31,6 @@ config_parser.readfp(config_io)
 note_dir = Path(config_parser.get('common', 'note_directory'))
 summary_dir = Path(config_parser.get('common', 'summary_directory'))
 merge_dir = Path(config_parser.get('common', 'merge_directory'))
-delim = config_parser.get('common', 'delimiter')
 tag_marker = config_parser.get('common', 'tag_marker')
 propagate_changes_interval = config_parser.getint('common', 'propagate_changes_interval')
 
@@ -46,7 +46,6 @@ cfg = dict(
     note_dir=note_dir,
     summary_dir=summary_dir,
     merge_dir=merge_dir,
-    delim=delim,
     tag_marker=tag_marker,
     propagate_changes_interval=propagate_changes_interval,
     searcher=searcher,
@@ -198,7 +197,7 @@ def extract_notes_from_summary(notes, summary_file):
     new_summary = [l for l in new_summary if not l.startswith(DATE_PREFIX)]
     new_summary = NEWLINE.join(new_summary)
 
-    segments = new_summary.split(delim)[1:]
+    segments = new_summary.split(NOTE_HEADER)[1:]
 
     if len(segments) > len(notes):
         raise Exception("Notes were added in the process of editing the summary file.")
@@ -208,6 +207,9 @@ def extract_notes_from_summary(notes, summary_file):
     extracted_notes = type(notes)()
 
     for (path, note), seg in zip(notes.items(), segments):
+        lines = seg.split(NEWLINE)
+        lines = lines[1:]
+        seg = NEWLINE.join(lines)
         seg = seg.strip()
         if cfg['show_tags']:
             _note = Note.from_string(path, seg)
@@ -282,7 +284,7 @@ def perform_diffs(notes, summary_file):
         new_tags = sorted(set(on_disk_note.tags) | set(extracted_note.tags))
         extracted_note = Note(merge_dir / path.name, diff_text, new_tags)
         extracted_note.save()
-        command = [cfg['viewer'], str(extracted_note.path)]
+        command = "{} {}".format(cfg['viewer'], extracted_note.path).split()
         call(command)
         edited_note = Note.from_path(extracted_note.path)
         edited_note = Note(path, edited_note.text, edited_note.tags)
@@ -336,10 +338,10 @@ def view_notes(paths):
                 new_date = datetime.datetime.utcfromtimestamp(mtime(path)).date()
                 if new_date != date:
                     date_str = new_date.strftime("%Y-%m-%d")
-                    to_write.append("{}{}(UTC)".format(DATE_PREFIX, date_str))
+                    to_write.append("{}{}(UTC) {}\n".format(DATE_PREFIX, date_str, "=" * 40))
                     date = new_date
 
-            to_write.append(delim)
+            to_write.append("{} `{}` {}\n".format(NOTE_HEADER, path.name, "-" * 40))
             to_write.append(note.as_string(cfg['show_tags']))
 
         # Latest version of the notes for which there is (after this function call)
@@ -357,7 +359,7 @@ def view_notes(paths):
 
         summary_mod_time = mtime(summary_path)
 
-        command = [cfg['viewer'], summary_file.name]
+        command = "{} {}".format(cfg['viewer'], summary_file.name).split()
         editing_process = Popen(command)
 
         while True:
@@ -508,7 +510,7 @@ def view_note_cl():
     parser.add_argument(
         '--show-tags', action='store_true', help="Supply to show tags.")
     parser.add_argument(
-        '--viewer', default='vim',
+        '--viewer', default='vim +/Note\s---',
         help="The program used to view search results. Defaults to: vim.")
     parser.add_argument(
         '--no-date', default=False, action='store_true',
