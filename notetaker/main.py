@@ -7,7 +7,7 @@ from tempfile import NamedTemporaryFile
 import argparse
 from subprocess import check_output, call, Popen, TimeoutExpired, CalledProcessError
 import pkg_resources
-from six.moves.configparser import SafeConfigParser
+from configparser import ConfigParser
 from six import StringIO, u
 from pathlib import Path
 from contextlib import contextmanager
@@ -25,8 +25,8 @@ NOTE_HEADER = u("# Note ---")
 config_string = pkg_resources.resource_string(__name__, 'config.ini')
 config_io = StringIO(config_string.decode(ENCODING))
 
-config_parser = SafeConfigParser()
-config_parser.readfp(config_io)
+config_parser = ConfigParser()
+config_parser.read_file(config_io)
 
 note_dir = Path(config_parser.get('common', 'note_directory'))
 summary_dir = Path(config_parser.get('common', 'summary_directory'))
@@ -510,7 +510,7 @@ def view_note_cl():
     parser.add_argument(
         '--show-tags', action='store_true', help="Supply to show tags.")
     parser.add_argument(
-        '--viewer', default='vim +/Note\s---',
+        '--viewer', default='vim +/Note\\s---',
         help="The program used to view search results. Defaults to: vim.")
     parser.add_argument(
         '--no-date', default=False, action='store_true',
