@@ -413,6 +413,42 @@ def make_note(name, tags):
         print("Note was not written to, so not saved.")
 
 
+template = """# <> {title}
+Authors:
+Venue:
+
+TAKEAWAY:
+
+-----------------------------
+
+"""
+
+
+def paper(name):
+    date_time_string = str(datetime.datetime.now()).split('.')[0]
+    for c in [":", ".", " ", "-"]:
+        date_time_string = date_time_string.replace(c, '_')
+
+    note_path = note_dir / "{}_{}.md".format(name, date_time_string)
+
+    template_text = template.format(title=name.replace('_', ' '))
+
+    with open(note_path, 'w') as f:
+        f.write(template_text)
+
+    try:
+        call(['vim', str(note_path)])
+    finally:
+        with open(note_path, 'r') as f:
+            new_text = f.read()
+        written = new_text != template_text
+
+        if written:
+            print("Saved as {}".format(note_path))
+        else:
+            print("Note was not written to, so not saved.")
+
+
 def search_view(args):
     """ Get the files to compose the summary file from by searching. """
 
@@ -575,7 +611,26 @@ def make_note_cl():
         make_note(args.name, tags)
 
 
+def paper_cl():
+    parser = argparse.ArgumentParser(description='Write a paper summary.')
+
+    parser.add_argument(
+        '--pdb', action='store_true', help="If supplied, enter post-mortem debugging on error.")
+    parser.add_argument('name', nargs='*', help="Name of paper.")
+    args = parser.parse_args()
+
+    name = args.name or []
+    name = '_'.join(name)
+
+    if args.pdb:
+        with pdb_postmortem():
+            paper(name)
+    else:
+        paper(name)
+
+
 if __name__ == "__main__":
     # Calling these makes argcomplete work.
     make_note_cl()
     view_note_cl()
+    paper_cl()
